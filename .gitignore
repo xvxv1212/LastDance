@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node.js
+node_modules/
+dist/
+build/
+
+# 비밀정보: 실제 값은 .env 에만 두고 커밋하지 않는다
+.env
+.env.*
+!.env.example
+
+# 업로드 파일·로컬 DB 데이터
+uploads/
+pgdata/
+
+# 에디터·OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 로그
+*.log
+
+# 로컬 처리 원문 / 테스트 생성물
+*.sqlite3
+*.db
+coverage.xml
+.coverage
+htmlcov/
