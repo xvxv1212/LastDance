@@ -39,9 +39,9 @@ def create_app(container: Container, cors_origins: tuple[str, ...] = ()) -> Fast
     return app
 
 
-def build_production_app() -> FastAPI:
-    """운영 진입점: `uvicorn app.main:build_production_app --factory`"""
-    settings = Settings.from_env()
+def build_container(settings: Settings | None = None) -> Container:
+    """환경설정으로 운영 컨테이너를 조립한다. API 서버와 운영자 명령(scripts/)이 같은 조립을 쓴다."""
+    settings = settings or Settings.from_env()
     _, factory = build_session_factory(settings.database_url)
     batch_factory = None
     if settings.batch_database_url:
@@ -74,5 +74,12 @@ def build_production_app() -> FastAPI:
             audit_log_days=settings.audit_log_days,
         ),
         access_token_minutes=settings.access_token_minutes,
+        public_signup_enabled=settings.public_signup_enabled,
     )
-    return create_app(container, settings.cors_origins)
+    return container
+
+
+def build_production_app() -> FastAPI:
+    """운영 진입점: `uvicorn app.main:build_production_app --factory`"""
+    settings = Settings.from_env()
+    return create_app(build_container(settings), settings.cors_origins)

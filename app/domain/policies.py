@@ -129,6 +129,10 @@ class ReportCompositionPolicy:
     def __init__(self, legal_policy: LegalExpressionPolicy) -> None:
         self._legal = legal_policy
 
+    def validate_summary(self, summary_text: str) -> None:
+        """v0.11 SUP-02: 요약문도 항목과 같은 금지 표현 검사를 받는다(요약으로 우회 금지)."""
+        self._legal.validate(summary_text)
+
     def apply(self, items: Iterable[ReportItem], facts: Iterable[ExtractedFact]) -> list[ReportItem]:
         """규칙 위반은 예외, 근거 부족은 hold_reason 을 채워 돌려준다."""
         items = list(items)

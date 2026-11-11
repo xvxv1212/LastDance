@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _flag(value: str | None) -> bool:
+    """켜짐으로 인정하는 값만 True. 비어 있거나 모르는 값은 False(닫힘이 기본)."""
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -35,6 +40,13 @@ class Settings:
     unconverted_session_days: int = 30
     closed_case_days: int = 30
     audit_log_days: int = 90
+    # v0.11 SUP-01: 공개 회원가입 스위치. 기본은 닫힘(False) — 명시적으로 켜야만 /auth/signup 이 열린다.
+    # 닫혀 있을 때 시험 계정은 scripts/issue_test_account.py(인증 전용 DB 접속 권한 필요)로만 만든다.
+    public_signup_enabled: bool = False
+    # v0.11 SUP-03: 체크포인트 저장소 연결 상태.
+    #   "NOT_USED"  = 이 배포는 체크포인트 저장소를 쓰지 않는다고 '명시'(지울 자료 없음)
+    #   None(미설정) = 연결 안 됨/자료 유무 불명 → 체크포인트 파기는 '미완료(대기)'로 남긴다
+    checkpoint_store: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -60,8 +72,13 @@ class Settings:
             unconverted_session_days=int(os.environ.get("HJ_UNCONVERTED_SESSION_DAYS", "30")),
             closed_case_days=int(os.environ.get("HJ_CLOSED_CASE_DAYS", "30")),
             audit_log_days=int(os.environ.get("HJ_AUDIT_LOG_DAYS", "90")),
+            public_signup_enabled=_flag(os.environ.get("HJ_PUBLIC_SIGNUP_ENABLED")),
+            checkpoint_store=(os.environ.get("HJ_CHECKPOINT_STORE") or "").strip().upper() or None,
         )
 
     def __post_init__(self) -> None:
+        if self.checkpoint_store not in (None, "NOT_USED"):
+            # 실제 체크포인트 저장소 어댑터는 아직 없다. 모르는 값을 '연결됨'으로 취급하지 않는다.
+            raise RuntimeError("HJ_CHECKPOINT_STORE 는 비우거나 NOT_USED 만 쓸 수 있습니다.")
         if self.service_jwt_secret is not None and self.service_jwt_secret == self.jwt_secret:
             raise RuntimeError("HJ_SERVICE_JWT_SECRET 은 HJ_JWT_SECRET 과 다른 값이어야 합니다.")

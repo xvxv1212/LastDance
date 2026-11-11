@@ -68,6 +68,7 @@ class Container:
         login_lock: uc_account.LoginLockPolicy | None = None,
         retention: uc_agent.RetentionPolicy | None = None,
         access_token_minutes: int = 60,
+        public_signup_enabled: bool = False,
     ) -> None:
         self._factory = session_factory
         # v0.8 RLS: 파기 배치처럼 모든 사용자 행을 다루는 작업은 RLS 우회 전용 계정(BYPASSRLS)으로만 접속
@@ -80,6 +81,9 @@ class Container:
         self._hasher = password_hasher or Argon2PasswordHasher()
         self._lock = login_lock or uc_account.LoginLockPolicy()
         self.access_token_minutes = access_token_minutes
+        # v0.11 SUP-01: 공개 회원가입은 기본 닫힘. 닫혀 있어도 sign_up() 유스케이스 자체는 남겨
+        # 권한 있는 발급 스크립트(인증 전용 DB 접속)가 같은 검증·해시 절차를 쓰게 한다.
+        self.public_signup_enabled = public_signup_enabled
         self._acting_user_id: uuid.UUID | None = None
         self.clock = clock
         self.storage = storage

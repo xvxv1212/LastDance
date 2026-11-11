@@ -50,7 +50,13 @@ async def _read_limited(file: UploadFile) -> bytes:
 # =============================================================================
 @router.post("/auth/signup", response_model=schemas.IdOut, status_code=status.HTTP_201_CREATED, tags=["계정"])
 def sign_up(body: schemas.SignUpIn, c: Container = Depends(get_container)) -> schemas.IdOut:
-    """이메일·비밀번호로 가입. 이미 있는 이메일이면 409. 가입 후 /auth/login 으로 로그인한다."""
+    """이메일·비밀번호로 가입. 이미 있는 이메일이면 409. 가입 후 /auth/login 으로 로그인한다.
+
+    v0.11 SUP-01: 공개 가입은 서버 설정(HJ_PUBLIC_SIGNUP_ENABLED)이 켜져 있을 때만 받는다. 기본은 닫힘(403).
+    닫힌 상태에서는 입력값(이메일 존재 여부 포함)을 전혀 처리하지 않는다.
+    """
+    if not c.public_signup_enabled:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "현재 공개 회원가입을 받지 않습니다.")
     cmd = uc_account.SignUpCommand(body.email, body.password, body.display_name)
     return schemas.IdOut(id=c.sign_up().execute(cmd))
 

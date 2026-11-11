@@ -213,6 +213,8 @@ def ctx(tmp_path: Path) -> Iterator[Ctx]:
         batch_session_factory=factory,
         service_verifier=service,
         password_hasher=HASHER,
+        # v0.11 SUP-01: 운영 기본값은 닫힘. 기존 가입 시험은 '명시적으로 켠' 상태에서만 돈다.
+        public_signup_enabled=True,
     )
     with TestClient(create_app(container)) as client:
         yield Ctx(
