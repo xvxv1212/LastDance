@@ -81,6 +81,8 @@ class FactStatus(StrEnum):
     CONFIRMED = "CONFIRMED"  # 사용자가 그대로 확인
     MODIFIED = "MODIFIED"  # 사용자가 수정 후 확인
     REJECTED = "REJECTED"  # 사용자가 틀렸다고 표시
+    # v0.11: 사용자가 '이 항목은 지금 모른다'는 것을 인지함. 사실 확인이 아니다(값은 계속 없음).
+    ACKNOWLEDGED_UNKNOWN = "ACKNOWLEDGED_UNKNOWN"
 
 
 class ConfirmAction(StrEnum):
@@ -89,6 +91,7 @@ class ConfirmAction(StrEnum):
     CONFIRM = "CONFIRM"
     MODIFY = "MODIFY"
     REJECT = "REJECT"
+    ACKNOWLEDGE_UNKNOWN = "ACKNOWLEDGE_UNKNOWN"  # v0.11: 미확인(UNKNOWN) 항목을 '모름'으로 인지 처리
 
 
 class ReportStatus(StrEnum):

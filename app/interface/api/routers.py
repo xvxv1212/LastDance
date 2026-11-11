@@ -151,6 +151,43 @@ def record_facts(
     return schemas.FactIdsOut(ids=caller.container.record_facts().execute(cmd))
 
 
+@router.get("/check-sessions/{session_id}/facts", response_model=schemas.SessionFactsOut, tags=["점검"])
+def list_facts(
+    session_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    c: Container = Depends(user_container),
+) -> schemas.SessionFactsOut:
+    """v0.11: 시민 본인의 사실 목록. AI 최초값·현재값·확인 상태·출처 위치·충돌 여부를 준다.
+
+    시민 토큰 전용이다. AI 서비스 토큰(쓰기 scope)으로는 읽을 수 없다(읽기 권한은 별도 결정 사항).
+    """
+    d = c.list_session_facts().execute(user_id, session_id)
+    return schemas.SessionFactsOut(
+        check_session_id=d.session.id,
+        session_status=d.session.status,
+        facts_confirmed_at=d.session.facts_confirmed_at,
+        facts=[
+            schemas.FactOut(
+                id=f.id,
+                fact_key=f.fact_key,
+                ai_value=f.ai_value_text,
+                current_value=f.value_text,
+                value_normalized=f.value_normalized,
+                status=f.status,
+                confirmed_at=f.confirmed_at,
+                has_conflict=f.has_conflict,
+                source_kind=f.source_kind,
+                document_id=f.document_id,
+                page_no=f.page_no,
+                offset_start=f.offset_start,
+                offset_end=f.offset_end,
+                source_span=f.source_span,
+            )
+            for f in d.facts
+        ],
+    )
+
+
 @router.post("/facts/{fact_id}/confirmation", response_model=schemas.SessionStatusOut, tags=["점검"])
 def confirm_fact(
     fact_id: uuid.UUID,
@@ -186,9 +223,56 @@ def submit_report(
         )
         for i in body.items
     )
-    cmd = uc_report.SubmitReportCommand(caller.user_id, session_id, body.summary_text, items)
+    cmd = uc_report.SubmitReportCommand(
+        caller.user_id, session_id, body.summary_text, items, body.facts_confirmed_at
+    )
     result = caller.container.submit_report().execute(cmd)
     return schemas.ReportOut(id=result.report_id, held_items=result.held_items)
+
+
+@router.get("/reports/{report_id}", response_model=schemas.ReportDetailOut, tags=["보고서"])
+def get_report(
+    report_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    c: Container = Depends(user_container),
+) -> schemas.ReportDetailOut:
+    """v0.11: 시민 본인의 보고서 상세(버전·상태·항목·인용 당시 출처·보류 사유). 시민 토큰 전용."""
+    d = c.get_report_detail().execute(user_id, report_id)
+    r = d.report
+    return schemas.ReportDetailOut(
+        id=r.id,
+        check_session_id=r.check_session_id,
+        version=r.version,
+        status=r.status,
+        summary_text=r.summary_text,
+        created_at=r.created_at,
+        approved_at=r.approved_at,
+        is_stale=d.is_stale,
+        held_items=sum(1 for i in r.items if i.is_held),
+        items=[
+            schemas.ReportItemOut(
+                id=i.id,
+                category=i.category,
+                content=i.content,
+                fact_id=i.fact_id,
+                hold_reason=i.hold_reason,
+                citations=[
+                    schemas.CitationOut(
+                        requested_chunk_ref=ci.requested_chunk_ref,
+                        chunk_id=ci.chunk_id,
+                        quoted_text=ci.quoted_text,
+                        check_result=ci.check_result,
+                        source_title=ci.source_title,
+                        source_url=ci.source_url,
+                        article_ref=ci.article_ref,
+                        effective_date=ci.effective_date,
+                    )
+                    for ci in i.citations
+                ],
+            )
+            for i in sorted(r.items, key=lambda x: x.sort_order)
+        ],
+    )
 
 
 @router.post("/reports/{report_id}/approval", status_code=status.HTTP_204_NO_CONTENT, tags=["보고서"])

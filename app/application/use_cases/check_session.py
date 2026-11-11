@@ -318,10 +318,54 @@ class ConfirmFact:
                 fact.id,
                 {"action": cmd.action, "fact_key": fact.fact_key},
             )
-            # 모든 사실이 확인되면 세션을 자동으로 다음 단계로 넘긴다.
+            # 미처리(EXTRACTED) 0건 + 값이 확인된 사실 1건 이상이면 세션을 다음 단계로 넘긴다(v0.11).
+            # 전부 '모름'·거부뿐이면 넘기지 않고, 이미 넘어가 있었다면 확인 대기로 되돌린다.
             all_facts = uow.facts.list_by_session(session.id)
-            if all(f.status != FactStatus.EXTRACTED for f in all_facts):
+            pending = any(f.status == FactStatus.EXTRACTED for f in all_facts)
+            if not pending and any(f.is_confirmed for f in all_facts):
                 session.mark_facts_confirmed(all_facts, now)
+                uow.sessions.save(session)
+            elif session.status != SessionStatus.FACTS_EXTRACTED:
+                session.reopen_facts(now)  # 보고서 승인 이후(REPORTED~)면 여기서 409
                 uow.sessions.save(session)
             uow.commit()
             return session.status
+
+
+# ===========================================================================
+# UC-05b 점검의 사실 목록 조회(v0.11) — 시민 본인만. 확인 화면이 다시 읽을 때 쓴다.
+# ===========================================================================
+@dataclass(frozen=True)
+class SessionFacts:
+    session: CheckSession
+    facts: list[ExtractedFact]
+
+
+class ListSessionFacts:
+    """한 점검의 사실 전체를 돌려준다. AI 최초값(ai_value_text)과 사용자 현재값(value_text)을 함께 준다.
+
+    민감 기록 열람이므로 감사 로그(READ_SENSITIVE)를 남긴다. 값 원문은 로그에 넣지 않는다.
+    """
+
+    def __init__(self, uow: UnitOfWork, clock: Clock) -> None:
+        self._uow = uow
+        self._clock = clock
+
+    def execute(self, user_id: uuid.UUID, session_id: uuid.UUID) -> SessionFacts:
+        with self._uow as uow:
+            session = uow.sessions.get(session_id)
+            if session is None:
+                raise NotFoundError("점검 기록을 찾을 수 없습니다.")
+            session.ensure_owned_by(user_id)
+            facts = sorted(uow.facts.list_by_session(session.id), key=lambda f: (f.created_at, str(f.id)))
+            audit(
+                uow,
+                self._clock,
+                user_id,
+                AuditAction.READ_SENSITIVE,
+                "check_sessions",
+                session.id,
+                {"view": "facts", "count": len(facts)},
+            )
+            uow.commit()
+        return SessionFacts(session, facts)

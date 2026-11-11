@@ -309,10 +309,15 @@ class ExtractedFactModel(Base):
         # 확인자·확인일시는 '확인 상태'와 함께 채워진다(구 fact_confirmations 대체).
         # v0.8: confirm_action 컬럼 삭제(멘토 10번) — 처리 종류는 status 로 1:1 대응한다
         #   CONFIRM ↔ CONFIRMED, MODIFY ↔ MODIFIED, REJECT ↔ REJECTED, 미처리 ↔ EXTRACTED
+        #   v0.11: ACKNOWLEDGE_UNKNOWN ↔ ACKNOWLEDGED_UNKNOWN (확인자·일시 = 모름을 인지 처리한 사람·시각)
         CheckConstraint(
             "(status = 'EXTRACTED') = (confirmed_at IS NULL)"
             " AND (confirmed_at IS NULL) = (confirmed_by IS NULL)",
             name="confirmation_complete",
+        ),
+        # v0.11: '모름 인지' 상태는 미확인(UNKNOWN) 항목에만 쓸 수 있다(값이 있는 사실에 붙일 수 없음)
+        CheckConstraint(
+            "status <> 'ACKNOWLEDGED_UNKNOWN' OR source_kind = 'UNKNOWN'", name="ack_only_unknown"
         ),
         # 출처 문서는 '같은 점검'에 올린 문서여야 한다(다른 사건 자료 혼입 금지)
         ForeignKeyConstraint(
@@ -362,7 +367,11 @@ class ExtractedFactModel(Base):
         code_enum(enums.FactStatus, "status"),
         nullable=False,
         server_default=enums.FactStatus.EXTRACTED.value,
-        **doc("확인 상태", "EXTRACTED/CONFIRMED/MODIFIED/REJECTED (CONFIRMED·MODIFIED = 승인된 사실)"),
+        **doc(
+            "확인 상태",
+            "EXTRACTED/CONFIRMED/MODIFIED/REJECTED/ACKNOWLEDGED_UNKNOWN "
+            "(CONFIRMED·MODIFIED = 승인된 사실, ACKNOWLEDGED_UNKNOWN = 모름 인지·값 없음)",
+        ),
     )
     has_conflict: Mapped[bool] = mapped_column(
         Boolean,

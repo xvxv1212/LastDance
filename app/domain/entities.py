@@ -194,12 +194,26 @@ class CheckSession:
         self._move(SessionStatus.FACTS_EXTRACTED, now)
 
     def mark_facts_confirmed(self, facts: list[ExtractedFact], now: datetime) -> None:
-        """모든 사실이 사용자 확인(확인·수정·거부)을 거쳐야 다음 단계로 갈 수 있다."""
+        """모든 사실이 사용자 처리(확인·수정·거부·모름 인지)를 거쳐야 다음 단계로 갈 수 있다.
+
+        v0.11: 값이 확인된 사실(CONFIRMED·MODIFIED)이 1건 이상 있어야 한다.
+        전부 '모름'이거나 전부 거부된 점검은 보고서로 쓸 사실이 없으므로 넘어가지 않는다.
+        """
         pending = [f for f in facts if f.status == FactStatus.EXTRACTED]
         if pending:
             raise ValidationError(f"아직 확인하지 않은 사실이 {len(pending)}건 있습니다.")
+        if not any(f.is_confirmed for f in facts):
+            raise ConflictError("값이 확인된 사실이 1건 이상 있어야 보고서 단계로 갈 수 있습니다.")
         self._move(SessionStatus.FACTS_CONFIRMED, now)
         self.facts_confirmed_at = now
+
+    def reopen_facts(self, now: datetime) -> None:
+        """v0.11: 확인 완료 뒤 '값이 확인된 사실'이 0건이 되면 확인 대기로 되돌린다(승인 시각도 비움).
+
+        보고서 승인(REPORTED) 이후에는 전이표에 없으므로 거부된다(기존 규칙 유지).
+        """
+        self._move(SessionStatus.FACTS_EXTRACTED, now)
+        self.facts_confirmed_at = None
 
     def mark_reported(self, now: datetime) -> None:
         self._move(SessionStatus.REPORTED, now)
@@ -262,6 +276,8 @@ class ExtractedFact:
         v0.6: 확인 이력 테이블(fact_confirmations) 대신 이 행의 확인 컬럼에 '마지막 처리'를 남긴다.
         - AI 원래 값은 ai_value_text 에 그대로 있으므로 '사람이 바꾼 값'과 언제든 비교할 수 있다.
         - 여러 번 고친 경우의 중간 값은 남기지 않는다(처리 사실·시각은 audit_logs 에 남음).
+        - v0.11 ACKNOWLEDGE_UNKNOWN: confirmed_by·confirmed_at 은 '모름을 인지 처리한 사람·시각'이다
+          (사실을 확인했다는 뜻이 아니다). 값·근거 유형은 UNKNOWN/NULL 그대로 둔다.
         """
         if action == ConfirmAction.CONFIRM:
             if self.source_kind == FactSourceKind.UNKNOWN:
@@ -275,6 +291,13 @@ class ExtractedFact:
             if self.source_kind == FactSourceKind.UNKNOWN:
                 self.source_kind = FactSourceKind.STATEMENT  # 시민이 직접 알려준 값 = 진술
             self.status = FactStatus.MODIFIED
+        elif action == ConfirmAction.ACKNOWLEDGE_UNKNOWN:
+            # v0.11: '모름 인지'. 값을 만들지 않는다 — 빈 문자열·0·임의 날짜 같은 대체값도 받지 않는다.
+            if new_value is not None:
+                raise ValidationError("'모름' 처리에는 값을 보내지 않습니다.")
+            if self.source_kind != FactSourceKind.UNKNOWN or self.value_text is not None:
+                raise ValidationError("미확인(UNKNOWN) 항목만 '모름'으로 처리할 수 있습니다.")
+            self.status = FactStatus.ACKNOWLEDGED_UNKNOWN
         else:
             self.status = FactStatus.REJECTED
         self.has_conflict = False

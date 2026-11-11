@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.application.ports.services import Clock, KnowledgeBase, UnitOfWork
 from app.application.use_cases.common import audit
@@ -25,6 +25,11 @@ class CitationInput:
     quoted_text: str
 
 
+def _utc(value: datetime) -> datetime:
+    """시간대 없는 값(SQLite 시험 DB)은 UTC 로 본다. 저장은 항상 UTC 다."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 @dataclass(frozen=True)
 class ReportItemInput:
     category: ReportCategory
@@ -39,6 +44,9 @@ class SubmitReportCommand:
     session_id: uuid.UUID
     summary_text: str
     items: tuple[ReportItemInput, ...]
+    # v0.11(선택): AI 가 초안을 만들 때 읽은 '사실 승인 시각'. 보내면 현재 값과 다를 때 저장을 거부한다
+    # (초안을 만드는 동안 사용자가 사실을 고친 경우). 안 보내면 기존과 같이 동작한다.
+    facts_confirmed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +90,11 @@ class SubmitInspectionReport:
             if session.status not in (SessionStatus.FACTS_CONFIRMED, SessionStatus.REPORTED):
                 raise ConflictError("사실 승인이 끝난 뒤에 보고서를 만들 수 있습니다.")
 
+            if cmd.facts_confirmed_at is not None and (
+                session.facts_confirmed_at is None
+                or _utc(cmd.facts_confirmed_at) != _utc(session.facts_confirmed_at)
+            ):
+                raise ConflictError("초안을 만드는 동안 사실이 바뀌었습니다. 사실을 다시 읽고 작성해 주세요.")
             # v0.11 SUP-02: 요약문에는 인용을 붙일 자리가 없다. 법률 단정 표현은 항목과 같이 저장 전에 거부한다.
             self._policy.validate_summary(cmd.summary_text)
             wanted = [c.source_chunk_id for i in cmd.items for c in i.citations]
@@ -182,3 +195,50 @@ class ApproveInspectionReport:
                 {"status": ReportStatus.APPROVED, "version": report.version},
             )
             uow.commit()
+
+
+# ===========================================================================
+# UC-07b 보고서 상세 조회(v0.11) — 시민 본인만
+# ===========================================================================
+@dataclass(frozen=True)
+class ReportDetail:
+    report: InspectionReport
+    is_stale: bool  # 초안 작성 뒤 사실이 바뀌어 승인할 수 없는 초안인지
+
+
+class GetReportDetail:
+    """보고서 1건(버전·상태·항목·인용 당시 출처·보류 사유)을 돌려준다. 열람은 감사 로그에 남긴다."""
+
+    def __init__(self, uow: UnitOfWork, clock: Clock) -> None:
+        self._uow = uow
+        self._clock = clock
+
+    def execute(self, user_id: uuid.UUID, report_id: uuid.UUID) -> ReportDetail:
+        with self._uow as uow:
+            report = uow.reports.get(report_id)
+            if report is None:
+                raise NotFoundError("보고서를 찾을 수 없습니다.")
+            session = uow.sessions.get(report.check_session_id)
+            if session is None:
+                raise NotFoundError("보고서를 찾을 수 없습니다.")
+            try:
+                session.ensure_owned_by(user_id)
+            except NotFoundError:
+                # 남의 보고서·지워진 점검의 보고서는 '없는 보고서'와 같은 응답(존재 여부 은닉)
+                raise NotFoundError("보고서를 찾을 수 없습니다.") from None
+            stale = (
+                report.status == ReportStatus.DRAFT
+                and session.facts_confirmed_at is not None
+                and report.created_at < session.facts_confirmed_at
+            ) or (report.status == ReportStatus.DRAFT and session.status == SessionStatus.FACTS_EXTRACTED)
+            audit(
+                uow,
+                self._clock,
+                user_id,
+                AuditAction.READ_SENSITIVE,
+                "inspection_reports",
+                report.id,
+                {"version": report.version},
+            )
+            uow.commit()
+        return ReportDetail(report, stale)

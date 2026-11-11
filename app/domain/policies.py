@@ -13,7 +13,14 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.domain.entities import ExtractedFact, ReportItem
-from app.domain.enums import CitationCheck, GuardCode, HoldReason, ReportCategory, TransferBasis
+from app.domain.enums import (
+    CitationCheck,
+    FactStatus,
+    GuardCode,
+    HoldReason,
+    ReportCategory,
+    TransferBasis,
+)
 from app.domain.errors import ValidationError
 
 
@@ -138,9 +145,17 @@ class ReportCompositionPolicy:
         items = list(items)
         if not items:
             raise ValidationError("보고서 항목이 비어 있습니다.")
+        facts = list(facts)
+        session_fact_ids = {f.id for f in facts}
         confirmed_ids = {f.id for f in facts if f.is_confirmed}
+        # v0.11: 사용자가 '모름'으로 인지한 항목은 빠짐없이 '미확인 정보'로 보고서에 나와야 한다
+        ack_ids = {f.id for f in facts if f.status == FactStatus.ACKNOWLEDGED_UNKNOWN}
         for item in items:
             self._legal.validate(item.content)
+            if item.fact_id is not None and item.fact_id not in session_fact_ids:
+                raise ValidationError("보고서 항목은 이 점검의 사실만 가리킬 수 있습니다.")
+            if item.fact_id in ack_ids and item.category != ReportCategory.UNVERIFIED:
+                raise ValidationError("'모름'으로 처리한 항목은 '미확인 정보'로만 쓸 수 있습니다.")
             if item.category == ReportCategory.CONFIRMED_FACT:
                 if item.fact_id is None or item.fact_id not in confirmed_ids:
                     raise ValidationError("'확인된 사실' 항목은 사용자가 승인한 사실과 연결되어야 합니다.")
@@ -149,6 +164,12 @@ class ReportCompositionPolicy:
                     item.hold_reason = HoldReason.NO_CITATION
                 elif not any(c.is_verified for c in item.citations):
                     item.hold_reason = HoldReason.CITATION_FAILED
+        listed = {i.fact_id for i in items if i.category == ReportCategory.UNVERIFIED}
+        missing = ack_ids - listed
+        if missing:
+            raise ValidationError(
+                f"'모름'으로 처리한 항목 {len(missing)}건이 '미확인 정보'(fact_id 연결)로 들어 있지 않습니다."
+            )
         return items
 
 

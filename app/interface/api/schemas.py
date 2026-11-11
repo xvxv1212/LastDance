@@ -7,10 +7,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain import enums
 
@@ -61,9 +61,43 @@ class ConfirmFactIn(_In):
     action: enums.ConfirmAction
     new_value: str | None = Field(default=None, max_length=2000)
 
+    @model_validator(mode="after")
+    def _no_value_for_unknown_ack(self) -> ConfirmFactIn:
+        # v0.11: '모름' 처리에는 값을 보내지 않는다. 빈 문자열·공백(잘린 뒤 "")·추정값 모두 422
+        if self.action == enums.ConfirmAction.ACKNOWLEDGE_UNKNOWN and self.new_value is not None:
+            raise ValueError("ACKNOWLEDGE_UNKNOWN 에는 new_value 를 보내지 않습니다(생략 또는 null).")
+        return self
+
 
 class SessionStatusOut(BaseModel):
     session_status: enums.SessionStatus
+
+
+class FactOut(BaseModel):
+    """사실 1건(v0.11 조회). 파일 경로·저장소 키·confidence 는 내보내지 않는다."""
+
+    id: uuid.UUID
+    fact_key: enums.FactKey
+    ai_value: str | None  # AI 가 처음 추출한 값(사용자가 고쳐도 바뀌지 않음). 미확인이면 null
+    current_value: str | None  # 사용자 확인·수정이 반영된 현재 값. 미확인·모름이면 null
+    value_normalized: dict[str, Any] | None
+    status: enums.FactStatus  # ACKNOWLEDGED_UNKNOWN = 모름 인지(사실 확인 아님)
+    # 처리 시각: CONFIRMED·MODIFIED·REJECTED 는 그 처리 시각, ACKNOWLEDGED_UNKNOWN 은 모름 인지 시각
+    confirmed_at: datetime | None
+    has_conflict: bool
+    source_kind: enums.FactSourceKind
+    document_id: uuid.UUID | None  # 출처 문서 ID(경로 아님)
+    page_no: int | None
+    offset_start: int | None
+    offset_end: int | None
+    source_span: str | None
+
+
+class SessionFactsOut(BaseModel):
+    check_session_id: uuid.UUID
+    session_status: enums.SessionStatus
+    facts_confirmed_at: datetime | None  # 보고서 초안 제출 때 facts_confirmed_at 로 되돌려 보낼 수 있는 값
+    facts: list[FactOut]
 
 
 # --- 보고서 -----------------------------------------------------------------
@@ -85,11 +119,48 @@ class ReportItemIn(_In):
 class ReportIn(_In):
     summary_text: str = Field(min_length=1, max_length=4000)
     items: list[ReportItemIn] = Field(min_length=1, max_length=100)
+    # v0.11(선택): 초안을 만들 때 기준으로 삼은 사실 승인 시각. 보내면 현재 값과 다를 때 409
+    facts_confirmed_at: datetime | None = None
 
 
 class ReportOut(BaseModel):
     id: uuid.UUID
     held_items: int
+
+
+class CitationOut(BaseModel):
+    """인용 '당시'의 출처 사본과 서버 검증 결과. 지식 DB 가 바뀌어도 이 값은 그대로다."""
+
+    requested_chunk_ref: str
+    chunk_id: str | None
+    quoted_text: str
+    check_result: enums.CitationCheck
+    source_title: str | None
+    source_url: str | None
+    article_ref: str | None
+    effective_date: date | None
+
+
+class ReportItemOut(BaseModel):
+    id: uuid.UUID
+    category: enums.ReportCategory
+    content: str
+    fact_id: uuid.UUID | None
+    hold_reason: enums.HoldReason | None  # 값이 있으면 보류 항목(확정 내용으로 보여 주지 않는다)
+    citations: list[CitationOut]
+
+
+class ReportDetailOut(BaseModel):
+    id: uuid.UUID
+    check_session_id: uuid.UUID
+    version: int
+    status: enums.ReportStatus
+    summary_text: str
+    created_at: datetime
+    approved_at: datetime | None
+    is_stale: bool  # true = 초안 작성 뒤 사실이 바뀜 → 승인 불가(새 초안 필요)
+    held_items: int
+    items: list[ReportItemOut]
 
 
 # --- 사건 -------------------------------------------------------------------

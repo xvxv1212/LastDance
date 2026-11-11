@@ -154,6 +154,9 @@ class Container:
     def confirm_fact(self) -> uc_check.ConfirmFact:
         return uc_check.ConfirmFact(self._uow(), self.clock)
 
+    def list_session_facts(self) -> uc_check.ListSessionFacts:
+        return uc_check.ListSessionFacts(self._uow(), self.clock)
+
     # --- 보고서 -----------------------------------------------------------
     def submit_report(self) -> uc_report.SubmitInspectionReport:
         return uc_report.SubmitInspectionReport(
@@ -162,6 +165,9 @@ class Container:
 
     def approve_report(self) -> uc_report.ApproveInspectionReport:
         return uc_report.ApproveInspectionReport(self._uow(), self.clock)
+
+    def get_report_detail(self) -> uc_report.GetReportDetail:
+        return uc_report.GetReportDetail(self._uow(), self.clock)
 
     # --- 사건 -------------------------------------------------------------
     def convert_to_case(self) -> uc_case.ConvertSessionToCase:
