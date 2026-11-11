@@ -130,8 +130,8 @@ class Container:
         return uc_account.WithdrawAccount(self._uow(), self.clock, self._hasher, self._lock)
 
     def purge_user_data(self) -> uc_agent.PurgeUserData:
-        if self.checkpoints is None:
-            raise RuntimeError("체크포인트 저장소가 설정되지 않아 파기를 실행할 수 없습니다.")
+        # v0.11 SUP-03: 체크포인트 저장소가 연결되지 않아도 DB·파일 파기는 진행한다.
+        # 체크포인트 대상(thread_id)은 purge_tasks 에 남고, 결과는 '미완료(NOT_CONNECTED)'로 보고된다.
         return uc_agent.PurgeUserData(
             SqlAlchemyUnitOfWork(self._batch_factory), self.clock, self.storage, self.checkpoints
         )
@@ -206,8 +206,6 @@ class Container:
         )
 
     def purge_expired_data(self) -> uc_agent.PurgeExpiredData:
-        if self.checkpoints is None:
-            raise RuntimeError("체크포인트 저장소가 설정되지 않아 파기를 실행할 수 없습니다.")
         return uc_agent.PurgeExpiredData(
             SqlAlchemyUnitOfWork(self._batch_factory),
             self.clock,

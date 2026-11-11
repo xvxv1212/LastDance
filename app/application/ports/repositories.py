@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
 
 from app.domain.entities import (
@@ -23,7 +24,7 @@ from app.domain.entities import (
     User,
     UserConsent,
 )
-from app.domain.enums import ConsentType
+from app.domain.enums import ConsentType, PurgeTaskKind
 
 
 class UserRepository(ABC):
@@ -168,6 +169,16 @@ class CaseRecordRepository(ABC):
     def list_evidences(self, case_id: uuid.UUID) -> list[Evidence]: ...
 
 
+@dataclass(frozen=True)
+class PurgeTask:
+    """아직 끝나지 않은 DB 밖 삭제 작업 1건(v0.11). 행이 남아 있다 = 아직 지우지 못했다."""
+
+    id: uuid.UUID
+    kind: PurgeTaskKind
+    target: str
+    attempts: int
+
+
 class PurgeRepository(ABC):
     """보관기한·삭제 요청에 따른 물리 파기 전용 저장소(DB-04). 일반 유스케이스에는 노출하지 않는다(ISP)."""
 
@@ -220,6 +231,22 @@ class PurgeRepository(ABC):
     @abstractmethod
     def delete_withdrawn_users_before(self, cutoff: datetime) -> int:
         """탈퇴 후 cutoff 가 지났고 감사 로그가 더 이상 가리키지 않는 빈 계정 행을 지운다."""
+
+    # --- v0.11 파기 대기 작업(DB 밖 자료 삭제의 영속 기록) -----------------------
+    @abstractmethod
+    def enqueue_tasks(self, kind: PurgeTaskKind, targets: list[str], now: datetime) -> int:
+        """삭제 대상을 기록한다. DB 행을 지우는 '같은 트랜잭션'에서 불러야 한다. 이미 있으면 건너뛴다."""
+
+    @abstractmethod
+    def pending_tasks(self, kind: PurgeTaskKind) -> list[PurgeTask]: ...
+
+    @abstractmethod
+    def complete_task(self, task_id: uuid.UUID) -> None:
+        """삭제가 끝난 작업의 기록을 지운다(대상 식별자를 더 보관하지 않는다)."""
+
+    @abstractmethod
+    def fail_task(self, task_id: uuid.UUID, code: str, now: datetime) -> None:
+        """실패를 기록한다(시도 횟수 +1, 사유 코드, 시각). 다음 배치가 다시 시도한다."""
 
 
 class AuditLogRepository(ABC):

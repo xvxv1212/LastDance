@@ -95,7 +95,8 @@ class SubmitInspectionReport:
                 or _utc(cmd.facts_confirmed_at) != _utc(session.facts_confirmed_at)
             ):
                 raise ConflictError("초안을 만드는 동안 사실이 바뀌었습니다. 사실을 다시 읽고 작성해 주세요.")
-            # v0.11 SUP-02: 요약문에는 인용을 붙일 자리가 없다. 법률 단정 표현은 항목과 같이 저장 전에 거부한다.
+            # v0.11 SUP-02: 요약문에는 인용을 붙일 자리가 없다.
+            # 법률 단정 표현은 항목과 같이 저장 전에 거부한다.
             self._policy.validate_summary(cmd.summary_text)
             wanted = [c.source_chunk_id for i in cmd.items for c in i.citations]
             # 지식 DB 는 업무 DB 와 다른 저장소다(v0.6). 읽기 전용 조회라 트랜잭션에 묶을 필요가 없다.

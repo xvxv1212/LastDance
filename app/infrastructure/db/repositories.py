@@ -26,6 +26,7 @@ from app.domain.enums import (
     ConsentType,
     HoldReason,
     PrepStatus,
+    PurgeTaskKind,
     ReportCategory,
     ReportStatus,
     UnverifiedStatus,
@@ -583,6 +584,35 @@ class SqlPurgeRepository(_SqlRepo, ports.PurgeRepository):
         )
         self._s.flush()
         return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+    # --- v0.11 파기 대기 작업 ------------------------------------------------
+    def enqueue_tasks(self, kind: PurgeTaskKind, targets: list[str], now: datetime) -> int:
+        wanted = list(dict.fromkeys(t for t in targets if t))
+        if not wanted:
+            return 0
+        m = orm.PurgeTaskModel
+        known = set(self._s.scalars(select(m.target).where(m.kind == kind, m.target.in_(wanted))))
+        fresh = [t for t in wanted if t not in known]
+        for target in fresh:
+            self._s.add(m(id=uuid.uuid4(), kind=kind, target=target, attempts=0, created_at=now))
+        self._s.flush()
+        return len(fresh)
+
+    def pending_tasks(self, kind: PurgeTaskKind) -> list[ports.PurgeTask]:
+        m = orm.PurgeTaskModel
+        rows = self._s.scalars(select(m).where(m.kind == kind).order_by(m.created_at, m.id))
+        return [ports.PurgeTask(r.id, PurgeTaskKind(r.kind), r.target, r.attempts) for r in rows]
+
+    def complete_task(self, task_id: uuid.UUID) -> None:
+        self._s.execute(delete(orm.PurgeTaskModel).where(orm.PurgeTaskModel.id == task_id))
+
+    def fail_task(self, task_id: uuid.UUID, code: str, now: datetime) -> None:
+        m = orm.PurgeTaskModel
+        self._s.execute(
+            update(m)
+            .where(m.id == task_id)
+            .values(attempts=m.attempts + 1, last_error_code=code[:40], last_attempt_at=now)
+        )
 
 
 class SqlAuditLogRepository(_SqlRepo, ports.AuditLogRepository):

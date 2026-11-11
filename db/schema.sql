@@ -1,6 +1,29 @@
 -- 권리채비 AI 업무 DB PostgreSQL 스키마 (models.py 에서 자동 생성, 직접 수정 금지)
 -- v0.6: 공식 지식(벡터)은 별도 벡터 지식 DB → pgvector 확장 불필요
 
+CREATE TABLE purge_tasks (
+	id UUID NOT NULL, 
+	kind VARCHAR(30) NOT NULL, 
+	target VARCHAR(255) NOT NULL, 
+	attempts INTEGER DEFAULT 0 NOT NULL, 
+	last_error_code VARCHAR(40), 
+	last_attempt_at TIMESTAMP WITH TIME ZONE, 
+	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
+	CONSTRAINT pk_purge_tasks PRIMARY KEY (id), 
+	CONSTRAINT uq_purge_tasks_kind_target UNIQUE (kind, target), 
+	CONSTRAINT ck_purge_tasks_attempts_non_negative CHECK (attempts >= 0), 
+	CONSTRAINT ck_purge_tasks_kind CHECK (kind IN ('FILE', 'CHECKPOINT'))
+);
+CREATE INDEX ix_purge_tasks_kind_created_at ON purge_tasks (kind, created_at);
+COMMENT ON TABLE purge_tasks IS '파기 대기 작업: DB 밖 자료(파일·체크포인트) 삭제 대기 기록. DB 행을 지우는 트랜잭션에서 함께 쓰고, 삭제가 끝나면 행을 지운다(행이 남아 있다 = 아직 지우지 못했다). 시민 접속 롤은 접근 불가';
+COMMENT ON COLUMN purge_tasks.id IS '식별자: UUID v4 기본키(순번 노출 방지)';
+COMMENT ON COLUMN purge_tasks.kind IS '종류: FILE(저장소 파일)/CHECKPOINT(LangGraph 체크포인트)';
+COMMENT ON COLUMN purge_tasks.target IS '대상: FILE=storage_key(랜덤 키), CHECKPOINT=thread_id(랜덤). 이름·내용 등 개인정보 아님';
+COMMENT ON COLUMN purge_tasks.attempts IS '시도 횟수: 삭제를 시도한 횟수';
+COMMENT ON COLUMN purge_tasks.last_error_code IS '마지막 실패 코드: DELETE_FAILED/STORE_NOT_CONNECTED. 오류 원문·경로는 기록하지 않는다';
+COMMENT ON COLUMN purge_tasks.last_attempt_at IS '마지막 시도일시: 아직 시도 전이면 NULL';
+COMMENT ON COLUMN purge_tasks.created_at IS '생성일시: 행 생성 시각(UTC 저장, 화면은 KST)';
+
 CREATE TABLE users (
 	id UUID NOT NULL, 
 	email VARCHAR(254), 
@@ -320,11 +343,12 @@ CREATE TABLE extracted_facts (
 	CONSTRAINT ck_extracted_facts_offset_pair CHECK ((offset_start IS NULL) = (offset_end IS NULL)), 
 	CONSTRAINT ck_extracted_facts_offset_range CHECK (offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)), 
 	CONSTRAINT ck_extracted_facts_confirmation_complete CHECK ((status = 'EXTRACTED') = (confirmed_at IS NULL) AND (confirmed_at IS NULL) = (confirmed_by IS NULL)), 
+	CONSTRAINT ck_extracted_facts_ack_only_unknown CHECK (status <> 'ACKNOWLEDGED_UNKNOWN' OR source_kind = 'UNKNOWN'), 
 	CONSTRAINT fk_extracted_facts_document_same_session FOREIGN KEY(document_id, check_session_id) REFERENCES documents (id, check_session_id) ON DELETE CASCADE, 
 	CONSTRAINT fk_extracted_facts_check_session_id_check_sessions FOREIGN KEY(check_session_id) REFERENCES check_sessions (id) ON DELETE CASCADE, 
 	CONSTRAINT ck_extracted_facts_fact_key CHECK (fact_key IN ('CONTRACT_DATE', 'CONTRACT_PERIOD', 'PAYMENT_AMOUNT', 'PAYMENT_METHOD', 'TOTAL_SESSIONS', 'USED_SESSIONS', 'CANCEL_REQUEST_DATE', 'BUSINESS_NAME', 'BUSINESS_RESPONSE', 'REFUND_CLAUSE', 'OTHER')), 
 	CONSTRAINT ck_extracted_facts_source_kind CHECK (source_kind IN ('DOCUMENT', 'STATEMENT', 'UNKNOWN')), 
-	CONSTRAINT ck_extracted_facts_status CHECK (status IN ('EXTRACTED', 'CONFIRMED', 'MODIFIED', 'REJECTED')), 
+	CONSTRAINT ck_extracted_facts_status CHECK (status IN ('EXTRACTED', 'CONFIRMED', 'MODIFIED', 'REJECTED', 'ACKNOWLEDGED_UNKNOWN')), 
 	CONSTRAINT fk_extracted_facts_confirmed_by_users FOREIGN KEY(confirmed_by) REFERENCES users (id)
 );
 CREATE INDEX ix_extracted_facts_check_session_id_fact_key ON extracted_facts (check_session_id, fact_key);
@@ -340,7 +364,7 @@ COMMENT ON COLUMN extracted_facts.page_no IS '페이지: 출처 페이지 번호
 COMMENT ON COLUMN extracted_facts.offset_start IS '시작 오프셋: 원문 문자 위치(0부터)';
 COMMENT ON COLUMN extracted_facts.offset_end IS '끝 오프셋: 원문 문자 위치(시작 이상)';
 COMMENT ON COLUMN extracted_facts.source_span IS '출처 구절: 근거가 된 원문 일부';
-COMMENT ON COLUMN extracted_facts.status IS '확인 상태: EXTRACTED/CONFIRMED/MODIFIED/REJECTED (CONFIRMED·MODIFIED = 승인된 사실)';
+COMMENT ON COLUMN extracted_facts.status IS '확인 상태: EXTRACTED/CONFIRMED/MODIFIED/REJECTED/ACKNOWLEDGED_UNKNOWN (CONFIRMED·MODIFIED = 승인된 사실, ACKNOWLEDGED_UNKNOWN = 모름 인지·값 없음)';
 COMMENT ON COLUMN extracted_facts.has_conflict IS '충돌 여부: 같은 항목에 다른 값이 있으면 true';
 COMMENT ON COLUMN extracted_facts.ai_value_text IS 'AI 추출값: AI 가 처음 추출한 값(수정 후에도 변경하지 않음, AI-01). UNKNOWN 이면 NULL';
 COMMENT ON COLUMN extracted_facts.confirmed_by IS '확인자 ID: users.id, 마지막으로 확인·수정·거부한 사용자';

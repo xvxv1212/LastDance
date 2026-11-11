@@ -2,7 +2,8 @@
 
 - 각 컬럼의 info["ko"] 는 '논리명', comment 는 '설명'으로 테이블명세서에 그대로 출력된다.
 - 테이블 순서는 요구사항 분석서의 엔티티 그룹 순서와 같다.
-  [사용자] → [AI 점검] → [보고서] → [사건] → [감사]  (업무 DB 10개 테이블)
+  [사용자] → [AI 점검] → [보고서] → [사건] → [감사] → [파기 대기]
+  (업무 DB 11개 테이블. v0.11 에서 purge_tasks 1개 추가 — 시민 자료가 아닌 파기 작업 기록)
 
 v0.6 저장소 분리(2026.11.06 DB 멘토링 피드백 권장안)
 - 업무 DB(이 파일)에는 '시민 개인의 업무 기록'만 둔다.
@@ -684,5 +685,45 @@ class AuditLogModel(Base):
     detail: Mapped[dict[str, Any] | None] = mapped_column(
         JsonType,
         **doc("상세", "건수·코드만(AI_CALL: 노드·상태·외부 전송 여부·처리 근거·차단 코드). 원문 기록 금지"),
+    )
+    created_at: Mapped[datetime] = created_at()
+
+
+# =============================================================================
+# [그룹 6] 파기 대기 작업 (v0.11)
+# =============================================================================
+class PurgeTaskModel(Base):
+    __tablename__ = "purge_tasks"
+    __table_args__ = (
+        UniqueConstraint("kind", "target"),
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        Index(None, "kind", "created_at"),
+        {
+            "comment": "DB 밖 자료(파일·체크포인트) 삭제 대기 기록. DB 행을 지우는 트랜잭션에서 함께 쓰고, "
+            "삭제가 끝나면 행을 지운다(행이 남아 있다 = 아직 지우지 못했다). 시민 접속 롤은 접근 불가",
+            "info": {"ko": "파기 대기 작업"},
+        },
+    )
+
+    id: Mapped[uuid.UUID] = pk()
+    kind: Mapped[enums.PurgeTaskKind] = mapped_column(
+        code_enum(enums.PurgeTaskKind, "kind"),
+        nullable=False,
+        **doc("종류", "FILE(저장소 파일)/CHECKPOINT(LangGraph 체크포인트)"),
+    )
+    target: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        **doc("대상", "FILE=storage_key(랜덤 키), CHECKPOINT=thread_id(랜덤). 이름·내용 등 개인정보 아님"),
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), **doc("시도 횟수", "삭제를 시도한 횟수")
+    )
+    last_error_code: Mapped[str | None] = mapped_column(
+        String(40),
+        **doc("마지막 실패 코드", "DELETE_FAILED/STORE_NOT_CONNECTED. 오류 원문·경로는 기록하지 않는다"),
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), **doc("마지막 시도일시", "아직 시도 전이면 NULL")
     )
     created_at: Mapped[datetime] = created_at()

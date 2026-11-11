@@ -11,6 +11,9 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
 import math
 from dataclasses import dataclass
 
@@ -38,11 +41,28 @@ class EmbeddingSpec:
     pooling: str = "mean"
     l2_normalize: bool = True
     max_tokens: int = 512
+    # v0.11: 색인 묶음(manifest) 설정. 하나라도 채우면 identifier 에 설정 해시가 붙어,
+    # 전처리·분할 방식·자료 버전이 다른 벡터가 같은 검색에 섞이지 않는다.
+    preprocessing: str = ""  # 전처리 규칙 버전(예: "nfc+ws1")
+    splitter: str = ""  # 분할 설정(예: "article/800/100")
+    corpus_version: str = ""  # 자료 묶음 버전(예: 외부 manifest 의 버전·해시)
+
+    @property
+    def settings_hash(self) -> str:
+        """이 설정 전체의 지문(SHA-256 앞 12자). 값 하나만 달라도 바뀐다."""
+        payload = json.dumps(dataclasses.asdict(self), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
     @property
     def identifier(self) -> str:
-        """knowledge.chunks.embedding_model 에 기록하는 값(모델@리비전)."""
-        return f"{self.model_id}@{self.revision}"
+        """knowledge.chunks.embedding_model 에 기록하는 값.
+
+        기본은 '모델@리비전'(v0.10 기록과 동일). manifest 설정을 채우면 '모델@리비전#설정해시'.
+        """
+        base = f"{self.model_id}@{self.revision}"
+        if self.preprocessing or self.splitter or self.corpus_version:
+            return f"{base}#{self.settings_hash}"
+        return base
 
     def format_query(self, text_: str) -> str:
         return f"{self.query_prefix}{text_}"
@@ -111,22 +131,30 @@ class PgVectorKnowledgeBase(KnowledgeBase):
     ) -> list[ChunkHit]:
         """코사인 거리 기준 상위 k개(AI 검색용). 폐지된 출처는 기본 제외.
 
-        spec 을 주면 질문 벡터의 차원·유한값을 검사하고, 같은 모델·리비전으로 만든 청크만 검색한다.
+        v0.11: spec 은 필수다(누락 차단). 질문 벡터의 차원·유한값을 검사하고,
+        같은 모델·리비전(·manifest 설정)으로 만든 청크만 검색한다. 서로 다른 설정의 벡터는 비교하지 않는다.
+
+        주의: 이 결과는 '검색 후보'일 뿐이다. 인용 검증(CitationVerifier)을 대신하지 않으며,
+        검색 점수·순위로 VERIFIED 를 만들지 않는다. active_only 는 '지금 유효한 출처' 기준이어서
+        과거 시점 사건의 근거임을 증명하지 못한다(그 경우는 보류).
         """
-        if spec is not None:
-            spec.validate(embedding, "질문 벡터")
+        if spec is None:
+            raise ValueError(
+                "검색에는 임베딩 설정(spec)이 필요합니다. 설정 없는 벡터 검색은 허용하지 않습니다."
+            )
+        spec.validate(embedding, "질문 벡터")
         sql = text(
             "SELECT c.id, c.content, c.embedding <=> CAST(:q AS vector) AS distance "
             "FROM knowledge.chunks c JOIN knowledge.sources s ON s.id = c.source_id "
             "WHERE c.embedding IS NOT NULL AND (s.is_active OR NOT :active_only) "
-            "AND (CAST(:model AS text) IS NULL OR c.embedding_model = :model) "
+            "AND c.embedding_model = :model "
             "ORDER BY distance LIMIT :k"
         )
         params = {
             "q": _vec(embedding),
             "k": int(k),
             "active_only": active_only,
-            "model": spec.identifier if spec is not None else None,
+            "model": spec.identifier,
         }
         with self._engine.connect() as conn:
             rows = conn.execute(sql, params).all()
@@ -143,10 +171,20 @@ def load_knowledge(
 ) -> int:
     """출처·청크를 적재(같은 ID 는 갱신). 적재 전용 계정(app_knowledge_loader)으로 실행한다.
 
-    spec 을 주면 벡터마다 차원·유한값을 검사하고 embedding_model 에 '모델@리비전'을 기록한다.
+    spec 을 주면 벡터마다 차원·유한값을 검사하고 embedding_model 에 설정 식별값을 기록한다.
     이번에 적재하지 않는 청크에 다른 모델·리비전의 벡터가 남아 있으면 섞이지 않도록 거부한다.
+
+    v0.11: 벡터를 적재할 때 spec 은 필수다(누락 차단). 본문·메타데이터만 적재할 때는 없어도 된다.
+    embedding_model 문자열만 넘기는 예전 방식은 받지 않는다(차원·설정을 검사할 수 없기 때문).
+
+    알려진 한계: 같은 ID 를 다시 적재하면 본문·출처 정보를 '덮어쓴다'(이력 없음). 과거 보고서는 인용 당시
+    사본을 스스로 갖고 있어 영향이 없지만, 자료가 개정되면 새 버전 ID 로 적재하는 것을 권한다(제안 사항).
     """
     embeddings = embeddings or {}
+    if embeddings and spec is None:
+        raise ValueError("벡터를 적재하려면 임베딩 설정(spec)이 필요합니다.")
+    if embedding_model is not None and spec is None:
+        raise ValueError("embedding_model 만으로는 적재할 수 없습니다. spec 을 넘기세요.")
     missing = {c.source_id for c in chunks} - {s.id for s in sources}
     if missing:
         raise ValueError(f"출처가 없는 청크가 있습니다: {sorted(missing)}")

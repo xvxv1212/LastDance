@@ -192,6 +192,24 @@ class ServiceTokenVerifier:
         )
 
 
+class CheckpointStoreUnavailableError(RuntimeError):
+    """체크포인트 저장소에 닿지 못했거나 자료 유무를 확인할 수 없음."""
+
+
+class NoCheckpointStore(CheckpointStore):
+    """'체크포인트 저장소를 쓰지 않는 배포'임을 명시하는 구현(v0.11).
+
+    지울 자료가 없으므로 아무것도 하지 않는다.
+
+    설정에서 HJ_CHECKPOINT_STORE=NOT_USED 로 '명시'했을 때만 쓴다. 설정을 비워 둔 것과 다르다.
+    """
+
+    in_use = False
+
+    def delete_thread(self, thread_id: str) -> None:
+        return None
+
+
 class LangGraphCheckpointStore(CheckpointStore):
     """LangGraph PostgresSaver 가 만드는 체크포인트 테이블에서 thread 단위로 삭제한다.
 
@@ -206,6 +224,10 @@ class LangGraphCheckpointStore(CheckpointStore):
 
     def delete_thread(self, thread_id: str) -> None:
         existing = set(inspect(self._engine).get_table_names())
+        if not existing.intersection(self.TABLES):
+            # v0.11: 체크포인트 테이블이 하나도 안 보이면 '지울 것이 없다'가 아니라 '확인 불가'다
+            # (잘못된 DB 에 붙었을 수 있다). 성공으로 처리하지 않고 대기 작업으로 남긴다.
+            raise CheckpointStoreUnavailableError("체크포인트 테이블을 찾을 수 없습니다.")
         with self._engine.begin() as conn:
             for table in self.TABLES:
                 if table in existing:  # 테이블명은 고정 목록에서만 가져오므로 SQL 주입 위험 없음

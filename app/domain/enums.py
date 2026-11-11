@@ -221,3 +221,10 @@ class AuditAction(StrEnum):
     CONSENT = "CONSENT"
     PURGE = "PURGE"  # 보관기한 경과·삭제 요청에 따른 물리 파기
     AI_CALL = "AI_CALL"  # 외부 AI 호출·차단 기록(v0.6: agent_runs 테이블 대신, 원문 없이 코드만)
+
+
+class PurgeTaskKind(StrEnum):
+    """v0.11 파기 대기 작업 종류: DB 밖에 있어 DB 트랜잭션으로 함께 지울 수 없는 자료."""
+
+    FILE = "FILE"  # 객체 저장소 파일(대상 = storage_key)
+    CHECKPOINT = "CHECKPOINT"  # LangGraph 체크포인트(대상 = thread_id)

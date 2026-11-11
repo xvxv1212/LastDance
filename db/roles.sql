@@ -42,6 +42,8 @@ GRANT SELECT, UPDATE, DELETE ON
     inspection_reports, cases, case_events, evidences
 TO app_batch;
 GRANT INSERT ON audit_logs TO app_batch;
+-- v0.11: 파기 대기 기록은 파기 전용 롤만 다룬다(시민 앱 롤 app_rw·인증 롤 app_auth 는 권한 없음)
+GRANT SELECT, INSERT, UPDATE, DELETE ON purge_tasks TO app_batch;
 GRANT SELECT, DELETE ON audit_logs TO app_batch;  -- v0.9 감사 로그 보관기간 파기(조회는 탈퇴 계정 빈 행 판정용)
 
 -- v0.9 회원가입·로그인 전용

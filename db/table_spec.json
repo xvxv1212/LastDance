@@ -736,7 +736,7 @@
     "fk": null,
     "on_delete": null,
     "default": "EXTRACTED",
-    "comment": "EXTRACTED/CONFIRMED/MODIFIED/REJECTED (CONFIRMED·MODIFIED = 승인된 사실)"
+    "comment": "EXTRACTED/CONFIRMED/MODIFIED/REJECTED/ACKNOWLEDGED_UNKNOWN (CONFIRMED·MODIFIED = 승인된 사실, ACKNOWLEDGED_UNKNOWN = 모름 인지·값 없음)"
    },
    {
     "name": "has_conflict",
@@ -809,19 +809,9 @@
   ],
   "constraints": [
    {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_offset_range",
-    "detail": "offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_unknown_has_no_value",
-    "detail": "(source_kind = 'UNKNOWN') = (value_text IS NULL)"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_confirmation_complete",
-    "detail": "(status = 'EXTRACTED') = (confirmed_at IS NULL) AND (confirmed_at IS NULL) = (confirmed_by IS NULL)"
+    "kind": "FK(복합)",
+    "name": "fk_extracted_facts_document_same_session",
+    "detail": "(document_id, check_session_id) → (documents.id, documents.check_session_id) (삭제 시 CASCADE)"
    },
    {
     "kind": "CHECK",
@@ -830,18 +820,33 @@
    },
    {
     "kind": "CHECK",
-    "name": "ck_extracted_facts_document_source_required",
-    "detail": "source_kind <> 'DOCUMENT' OR document_id IS NOT NULL"
+    "name": "ck_extracted_facts_ack_only_unknown",
+    "detail": "status <> 'ACKNOWLEDGED_UNKNOWN' OR source_kind = 'UNKNOWN'"
    },
    {
-    "kind": "FK(복합)",
-    "name": "fk_extracted_facts_document_same_session",
-    "detail": "(document_id, check_session_id) → (documents.id, documents.check_session_id) (삭제 시 CASCADE)"
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_offset_range",
+    "detail": "offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)"
    },
    {
     "kind": "CHECK",
     "name": "ck_extracted_facts_offset_pair",
     "detail": "(offset_start IS NULL) = (offset_end IS NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_document_source_required",
+    "detail": "source_kind <> 'DOCUMENT' OR document_id IS NOT NULL"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_confirmation_complete",
+    "detail": "(status = 'EXTRACTED') = (confirmed_at IS NULL) AND (confirmed_at IS NULL) = (confirmed_by IS NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_unknown_has_no_value",
+    "detail": "(source_kind = 'UNKNOWN') = (value_text IS NULL)"
    }
   ],
   "indexes": [
@@ -1599,6 +1604,110 @@
    {
     "name": "ix_audit_logs_target_type_target_id",
     "detail": "target_type, target_id"
+   }
+  ]
+ },
+ {
+  "name": "purge_tasks",
+  "ko": "파기 대기 작업",
+  "comment": "DB 밖 자료(파일·체크포인트) 삭제 대기 기록. DB 행을 지우는 트랜잭션에서 함께 쓰고, 삭제가 끝나면 행을 지운다(행이 남아 있다 = 아직 지우지 못했다). 시민 접속 롤은 접근 불가",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "kind",
+    "ko": "종류",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "FILE(저장소 파일)/CHECKPOINT(LangGraph 체크포인트)"
+   },
+   {
+    "name": "target",
+    "ko": "대상",
+    "type": "VARCHAR(255)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "FILE=storage_key(랜덤 키), CHECKPOINT=thread_id(랜덤). 이름·내용 등 개인정보 아님"
+   },
+   {
+    "name": "attempts",
+    "ko": "시도 횟수",
+    "type": "INTEGER",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "0",
+    "comment": "삭제를 시도한 횟수"
+   },
+   {
+    "name": "last_error_code",
+    "ko": "마지막 실패 코드",
+    "type": "VARCHAR(40)",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "DELETE_FAILED/STORE_NOT_CONNECTED. 오류 원문·경로는 기록하지 않는다"
+   },
+   {
+    "name": "last_attempt_at",
+    "ko": "마지막 시도일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "아직 시도 전이면 NULL"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "CHECK",
+    "name": "ck_purge_tasks_attempts_non_negative",
+    "detail": "attempts >= 0"
+   },
+   {
+    "kind": "UNIQUE",
+    "name": "uq_purge_tasks_kind_target",
+    "detail": "kind, target"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_purge_tasks_kind_created_at",
+    "detail": "kind, created_at"
    }
   ]
  }

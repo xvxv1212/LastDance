@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.application.ports.services import KnowledgeBase
+from app.application.ports.services import CheckpointStore, KnowledgeBase
 from app.application.use_cases.account import LoginLockPolicy
 from app.application.use_cases.agent import RetentionPolicy
 from app.config import Settings
@@ -17,7 +17,14 @@ from app.container import Container
 from app.infrastructure.db.engine import build_session_factory
 from app.infrastructure.knowledge import JsonAgencyDirectory, LocalKnowledgeBase
 from app.infrastructure.pgvector_knowledge import PgVectorKnowledgeBase
-from app.infrastructure.services import JwtTokenVerifier, LocalFileStorage, ServiceTokenVerifier, SystemClock
+from app.infrastructure.services import (
+    JwtTokenVerifier,
+    LangGraphCheckpointStore,
+    LocalFileStorage,
+    NoCheckpointStore,
+    ServiceTokenVerifier,
+    SystemClock,
+)
 from app.interface.api.error_handlers import register_error_handlers
 from app.interface.api.routers import router
 
@@ -55,12 +62,19 @@ def build_container(settings: Settings | None = None) -> Container:
         knowledge = PgVectorKnowledgeBase(knowledge_engine)
     else:
         knowledge = LocalKnowledgeBase.from_json(settings.knowledge_path)
+    checkpoints: CheckpointStore | None = None  # None = 연결 안 됨(체크포인트 파기는 대기로 남는다)
+    if settings.checkpoint_database_url:
+        checkpoint_engine, _ = build_session_factory(settings.checkpoint_database_url)
+        checkpoints = LangGraphCheckpointStore(checkpoint_engine)
+    elif settings.checkpoint_store == "NOT_USED":
+        checkpoints = NoCheckpointStore()
     container = Container(
         session_factory=factory,
         clock=SystemClock(),
         storage=LocalFileStorage(settings.storage_dir),
         token_verifier=JwtTokenVerifier(settings.jwt_secret),
         retention_days=settings.document_retention_days,
+        checkpoints=checkpoints,
         knowledge=knowledge,
         agencies=JsonAgencyDirectory.from_json(settings.agencies_path),
         batch_session_factory=batch_factory,

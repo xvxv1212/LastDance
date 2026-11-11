@@ -8,8 +8,11 @@ SQLite·PostgreSQL·RLS 모드(HJ_TEST_DATABASE_URL / HJ_TEST_APP_DATABASE_URL)�
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import jwt
 import pytest
@@ -47,7 +50,7 @@ def _withdraw(ctx: Ctx, headers: dict[str, str], password: str = PASSWORD) -> in
 
 def _user_row(ctx: Ctx, user_id: uuid.UUID) -> orm.UserModel | None:
     with ctx.factory() as s:
-        row = s.get(orm.UserModel, user_id)
+        row: orm.UserModel | None = s.get(orm.UserModel, user_id)
         if row is not None:
             s.expunge(row)
         return row
@@ -498,7 +501,7 @@ def test_pgvector_knowledge_base_loads_verifies_and_searches(ctx: Ctx) -> None:
 
     from app.infrastructure.db.engine import build_session_factory
     from app.infrastructure.knowledge import KnowledgeChunk, KnowledgeSource
-    from app.infrastructure.pgvector_knowledge import PgVectorKnowledgeBase, load_knowledge
+    from app.infrastructure.pgvector_knowledge import EmbeddingSpec, PgVectorKnowledgeBase, load_knowledge
 
     url = os.environ.get("HJ_TEST_DATABASE_URL", "")
     if not url.startswith("postgresql"):
@@ -507,7 +510,7 @@ def test_pgvector_knowledge_base_loads_verifies_and_searches(ctx: Ctx) -> None:
     ddl = (Path(__file__).resolve().parents[1] / "db" / "knowledge_schema.sql").read_text(encoding="utf-8")
     raw = engine.raw_connection()
     try:
-        with raw.cursor() as cur:
+        with closing(raw.cursor()) as cur:
             cur.execute("DROP SCHEMA IF EXISTS knowledge CASCADE")
             cur.execute(ddl)
         raw.commit()
@@ -523,18 +526,35 @@ def test_pgvector_knowledge_base_loads_verifies_and_searches(ctx: Ctx) -> None:
         KnowledgeChunk("old#0", "old", 0, "폐지된 기준", None),
     ]
     emb = {"law#0": [1.0, 0.0, 0.0], "law#1": [0.0, 1.0, 0.0], "old#0": [0.99, 0.1, 0.0]}
-    assert load_knowledge(engine, [src, old], chunks, emb, "test-3d") == 3
-    assert load_knowledge(engine, [src, old], chunks, emb, "test-3d") == 3  # 재적재(멱등)
+    # v0.11: 벡터 적재·검색에는 설정(spec)이 필수다. 3차원 합성 벡터용 시험 설정을 명시한다.
+    spec3 = EmbeddingSpec(model_id="test-3d", revision="r1", dimension=3)
+    with pytest.raises(ValueError, match="spec"):
+        load_knowledge(engine, [src, old], chunks, emb, "test-3d")  # 예전 방식(문자열만)은 거부
+    with pytest.raises(ValueError, match="spec"):
+        load_knowledge(engine, [src, old], chunks, emb)
+    assert load_knowledge(engine, [src, old], chunks) == 3  # 본문·메타데이터만 적재는 spec 없이 가능
+    assert load_knowledge(engine, [src, old], chunks, emb, spec=spec3) == 3
+    assert load_knowledge(engine, [src, old], chunks, emb, spec=spec3) == 3  # 재적재(멱등)
     kb = PgVectorKnowledgeBase(engine)
     facts = kb.chunk_facts(["law#0", "old#0", "none"])
     assert set(facts) == {"law#0", "old#0"}
     assert facts["law#0"].article_ref == "제1조" and facts["old#0"].source_active is False
-    hits = kb.similar_chunks([1.0, 0.05, 0.0], k=2)
+    with pytest.raises(ValueError, match="spec"):
+        kb.similar_chunks([1.0, 0.05, 0.0], k=2)  # 설정 없는 검색은 거부
+    hits = kb.similar_chunks([1.0, 0.05, 0.0], k=2, spec=spec3)
     assert [h.chunk_id for h in hits] == ["law#0", "law#1"]  # 폐지 출처 제외
-    assert kb.similar_chunks([1.0, 0.05, 0.0], k=1, active_only=False)[0].chunk_id in {"law#0", "old#0"}
+    top = kb.similar_chunks([1.0, 0.05, 0.0], k=1, active_only=False, spec=spec3)
+    assert top[0].chunk_id in {"law#0", "old#0"}
+    # manifest 설정(전처리·분할·자료 버전)이 다르면 식별값이 달라져 섞이지 않는다
+    v2 = dataclasses.replace(spec3, splitter="article/800/100", corpus_version="2026-11-11")
+    assert v2.identifier.startswith("test-3d@r1#") and v2.identifier != spec3.identifier
+    assert dataclasses.replace(v2, corpus_version="2026-11-12").identifier != v2.identifier
+    assert kb.similar_chunks([1.0, 0.05, 0.0], k=2, spec=v2) == []
+    with pytest.raises(ValueError, match="다른 모델"):
+        load_knowledge(engine, [src], [chunks[0]], {"law#0": [1.0, 0.0, 0.0]}, spec=v2)
     # 업무 DB 와 FK 없음: knowledge 스키마의 외래키는 knowledge 안에서만
     with engine.connect() as conn:
-        refs = (
+        found: list[Any] = list(
             conn.exec_driver_sql(
                 "SELECT DISTINCT ccu.table_schema FROM information_schema.table_constraints tc "
                 "JOIN information_schema.constraint_column_usage ccu "
@@ -544,6 +564,7 @@ def test_pgvector_knowledge_base_loads_verifies_and_searches(ctx: Ctx) -> None:
             .scalars()
             .all()
         )
+    refs: list[str] = [str(v) for v in found]
     assert refs == ["knowledge"]
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP SCHEMA knowledge CASCADE")

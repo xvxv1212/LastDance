@@ -67,8 +67,13 @@ class ExternalModelClient(ABC):
 class CheckpointStore(ABC):
     """LangGraph 체크포인트 저장소(라이브러리 관리 테이블). 업무 DB 와 분리돼 있어 파기를 따로 호출한다."""
 
+    # v0.11: False = '이 배포는 체크포인트 저장소를 쓰지 않는다'고 명시한 구현(지울 자료가 없음).
+    # 저장소가 아예 주입되지 않은 것(None = 연결 안 됨·자료 유무 불명)과는 다르다.
+    in_use: bool = True
+
     @abstractmethod
-    def delete_thread(self, thread_id: str) -> None: ...
+    def delete_thread(self, thread_id: str) -> None:
+        """thread 의 체크포인트를 지운다. 지웠는지 알 수 없으면 예외를 던져야 한다(조용히 성공 금지)."""
 
 
 class KnowledgeBase(ABC):

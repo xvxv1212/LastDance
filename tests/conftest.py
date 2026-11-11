@@ -122,7 +122,10 @@ def _apply_rls(engine: Any, app_role: str) -> None:
     try:
         with raw.cursor() as cur:
             cur.execute(RLS_SQL.read_text(encoding="utf-8"))
-            tables = [t.name for t in Base.metadata.sorted_tables if t.name != "audit_logs"]
+            # purge_tasks(v0.11)는 파기 전용 접속만 쓴다. 시민 앱 롤에는 어떤 권한도 주지 않는다
+            tables = [
+                t.name for t in Base.metadata.sorted_tables if t.name not in ("audit_logs", "purge_tasks")
+            ]
             cur.execute(f'GRANT SELECT, INSERT, UPDATE ON {", ".join(tables)} TO "{app_role}"')
             cur.execute(f'GRANT INSERT ON audit_logs TO "{app_role}"')
         raw.commit()
