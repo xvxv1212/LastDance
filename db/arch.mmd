@@ -1,0 +1,30 @@
+flowchart TB
+    subgraph IF["① interface 계층 (app/interface)"]
+        R["FastAPI 라우터·스키마<br/>요청 검증·인증·예외→HTTP 변환"]
+    end
+    CR["컴포지션 루트 (app/container.py)<br/>구현체 조립·주입"]
+    subgraph AP["② application 계층 (app/application)"]
+        U["유스케이스 18종<br/>StartCheckSession, ConfirmFact,<br/>ConvertSessionToCase …"]
+        PT["포트(추상 인터페이스)<br/>Repository·UnitOfWork·FileStorage·Clock<br/>KnowledgeBase·AgencyDirectory<br/>ExternalModelClient·CheckpointStore"]
+    end
+    subgraph DM["③ domain (외부 의존 0)"]
+        E["엔티티·상태전이 규칙<br/>AiCallRecord"]
+        PO["정책: 업로드·마스킹·법률표현<br/>보고서 구성·인용 검증·외부 전송"]
+    end
+    subgraph IN["④ infrastructure 계층 (app/infrastructure)"]
+        DB["SQLAlchemy 저장소·UoW<br/>PostgreSQL 16 업무 DB(10개 테이블)"]
+        KN["지식 DB·기관 목록 어댑터<br/>(JSON 파일 → 벡터 DB 교체 가능)"]
+        FS["파일 저장소·JWT 검증·시계"]
+    end
+    R --> U
+    CR --> U
+    CR --> DB
+    CR --> KN
+    CR --> FS
+    U --> PT
+    U --> E
+    U --> PO
+    PO --> E
+    DB -. "구현(implements)" .-> PT
+    KN -. "구현(implements)" .-> PT
+    FS -. "구현(implements)" .-> PT

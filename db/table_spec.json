@@ -1,0 +1,1605 @@
+[
+ {
+  "name": "users",
+  "ko": "사용자",
+  "comment": "서비스 회원 계정(탈퇴 시 식별정보를 지운 빈 행으로 남김)",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "email",
+    "ko": "이메일",
+    "type": "VARCHAR(254)",
+    "nullable": true,
+    "keys": [
+     "UQ"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "로그인 ID. 소문자로 정규화하여 저장. v0.9: 탈퇴 시 NULL(같은 이메일 재가입 허용)"
+   },
+   {
+    "name": "password_hash",
+    "ko": "비밀번호 해시",
+    "type": "VARCHAR(255)",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "Argon2id 해시(평문 저장 금지). v0.9: 탈퇴 시 NULL"
+   },
+   {
+    "name": "display_name",
+    "ko": "표시 이름",
+    "type": "VARCHAR(50)",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "실명 아님. 선택 입력. 탈퇴 시 NULL"
+   },
+   {
+    "name": "role",
+    "ko": "역할",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "CITIZEN",
+    "comment": "CITIZEN/COUNSELOR/ADMIN. v0.9 MVP 는 CITIZEN 만 사용(상담사·관리자 원문 열람 없음)"
+   },
+   {
+    "name": "status",
+    "ko": "계정 상태",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "ACTIVE",
+    "comment": "ACTIVE/DORMANT/WITHDRAWN. ACTIVE 가 아니면 모든 API 거부"
+   },
+   {
+    "name": "failed_login_count",
+    "ko": "로그인 실패 횟수",
+    "type": "INTEGER",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "0",
+    "comment": "연속 실패 횟수(성공 시 0). 기준 횟수에 이르면 잠금"
+   },
+   {
+    "name": "locked_until",
+    "ko": "잠금 해제 시각",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "연속 실패로 잠긴 경우 이 시각까지 로그인 거부"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   },
+   {
+    "name": "updated_at",
+    "ko": "수정일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "마지막 변경 시각"
+   },
+   {
+    "name": "deleted_at",
+    "ko": "탈퇴일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "탈퇴 시각. 감사 로그 보관기간이 지나면 이 빈 행도 파기"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "CHECK",
+    "name": "ck_users_login_required",
+    "detail": "status = 'WITHDRAWN' OR (email IS NOT NULL AND password_hash IS NOT NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_users_withdrawn_has_no_identity",
+    "detail": "status <> 'WITHDRAWN' OR (email IS NULL AND password_hash IS NULL AND display_name IS NULL AND deleted_at IS NOT NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_users_failed_login_count_non_negative",
+    "detail": "failed_login_count >= 0"
+   }
+  ],
+  "indexes": []
+ },
+ {
+  "name": "user_consents",
+  "ko": "사용자 동의 이력",
+  "comment": "개인정보·문서·국외이전 동의 및 철회 이력(append-only)",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "user_id",
+    "ko": "사용자 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "users.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "users.id"
+   },
+   {
+    "name": "consent_type",
+    "ko": "동의 종류",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "PRIVACY_REQUIRED/SENSITIVE_DOCUMENT/OVERSEAS_TRANSFER"
+   },
+   {
+    "name": "policy_version",
+    "ko": "약관 버전",
+    "type": "VARCHAR(20)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "동의 당시 고지문 버전(예: 2026-11-v1)"
+   },
+   {
+    "name": "agreed",
+    "ko": "동의 여부",
+    "type": "BOOLEAN",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "true=동의, false=철회"
+   },
+   {
+    "name": "agreed_at",
+    "ko": "처리일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "동의 또는 철회 처리 시각"
+   },
+   {
+    "name": "withdrawn_at",
+    "ko": "철회일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "철회 시에만 기록"
+   }
+  ],
+  "constraints": [],
+  "indexes": [
+   {
+    "name": "ix_user_consents_user_id_consent_type_agreed_at",
+    "detail": "user_id, consent_type, agreed_at"
+   }
+  ]
+ },
+ {
+  "name": "check_sessions",
+  "ko": "AI 점검 세션",
+  "comment": "AI 통합 점검 1회분(상황 입력~보고서). 사건 연결은 cases.origin_session_id 로만 관리",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "user_id",
+    "ko": "사용자 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "users.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "점검 소유자, users.id"
+   },
+   {
+    "name": "entry_type",
+    "ko": "진입 경로",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "REFUND_CONCERN/DISPUTE_OCCURRED/PRE_CONTRACT"
+   },
+   {
+    "name": "situation_text",
+    "ko": "상황 설명",
+    "type": "TEXT",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "생활언어 입력 원문(고유식별정보 마스킹 후 저장). v0.8: PDF 만으로 시작하면 NULL(이때는 계약서 PDF 가 있어야 사실 추출 가능)"
+   },
+   {
+    "name": "status",
+    "ko": "진행 상태",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "DRAFT",
+    "comment": "DRAFT→FACTS_EXTRACTED→FACTS_CONFIRMED→REPORTED→CONVERTED / ABANDONED"
+   },
+   {
+    "name": "facts_confirmed_at",
+    "ko": "사실 승인일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "사용자가 추출 사실 전체를 승인한 시각(DEC-01: 사건 전 승인 기록)"
+   },
+   {
+    "name": "thread_id",
+    "ko": "AI 스레드 ID",
+    "type": "VARCHAR(64)",
+    "nullable": true,
+    "keys": [
+     "UQ"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "LangGraph thread_id(추측 불가 랜덤). 구 agent_threads 대체, 체크포인트 파기 기준"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   },
+   {
+    "name": "updated_at",
+    "ko": "수정일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "마지막 변경 시각"
+   },
+   {
+    "name": "deleted_at",
+    "ko": "삭제일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "논리 삭제 시각. 값이 있으면 조회에서 제외, 파기 배치 대상"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "UNIQUE",
+    "name": "uq_check_sessions_id_user_id",
+    "detail": "id, user_id"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_check_sessions_updated_at",
+    "detail": "updated_at"
+   },
+   {
+    "name": "ix_check_sessions_user_id_created_at",
+    "detail": "user_id, created_at"
+   }
+  ]
+ },
+ {
+  "name": "documents",
+  "ko": "업로드 문서",
+  "comment": "업로드 파일 메타데이터(본문은 암호화 객체 저장소). 점검·사건 중 최소 하나에 소속",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "owner_id",
+    "ko": "소유자 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "users.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "users.id, 부모 점검·사건 소유자와 같아야 함"
+   },
+   {
+    "name": "check_session_id",
+    "ko": "점검 세션 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "check_sessions.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "업로드된 점검"
+   },
+   {
+    "name": "case_id",
+    "ko": "사건 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "cases.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "사건 전환·증거 첨부 시 연결"
+   },
+   {
+    "name": "original_name",
+    "ko": "원본 파일명",
+    "type": "VARCHAR(200)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "표시용(경로 문자 제거). 저장 경로로 사용 금지"
+   },
+   {
+    "name": "mime_type",
+    "ko": "MIME 유형",
+    "type": "VARCHAR(100)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "MVP 는 application/pdf 만 허용"
+   },
+   {
+    "name": "size_bytes",
+    "ko": "파일 크기",
+    "type": "BIGINT",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "바이트, 최대 10MB"
+   },
+   {
+    "name": "storage_key",
+    "ko": "저장소 키",
+    "type": "VARCHAR(100)",
+    "nullable": false,
+    "keys": [
+     "UQ"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "추측 불가 랜덤 키(객체 저장소 경로)"
+   },
+   {
+    "name": "sha256",
+    "ko": "SHA-256",
+    "type": "VARCHAR(64)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "파일 무결성 해시"
+   },
+   {
+    "name": "page_count",
+    "ko": "페이지 수",
+    "type": "INTEGER",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "PDF 파싱 후 기록"
+   },
+   {
+    "name": "retention_until",
+    "ko": "보관 기한",
+    "type": "DATE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "정보용. v0.8: 문서 단독 파기 안 함, 사건·점검과 함께 파기"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   },
+   {
+    "name": "deleted_at",
+    "ko": "삭제일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "논리 삭제 시각. 값이 있으면 조회에서 제외, 파기 배치 대상"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "UNIQUE",
+    "name": "uq_documents_id_check_session_id",
+    "detail": "id, check_session_id"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_documents_page_count_positive",
+    "detail": "page_count IS NULL OR page_count >= 1"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_documents_parent_required",
+    "detail": "check_session_id IS NOT NULL OR case_id IS NOT NULL"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_documents_session_owner",
+    "detail": "(check_session_id, owner_id) → (check_sessions.id, check_sessions.user_id) (삭제 시 CASCADE)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_documents_size_range",
+    "detail": "size_bytes > 0 AND size_bytes <= 10485760"
+   },
+   {
+    "kind": "UNIQUE",
+    "name": "uq_documents_id_case_id",
+    "detail": "id, case_id"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_documents_case_owner",
+    "detail": "(case_id, owner_id) → (cases.id, cases.owner_id) (삭제 시 CASCADE)"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_documents_case_id",
+    "detail": "case_id"
+   },
+   {
+    "name": "ix_documents_check_session_id",
+    "detail": "check_session_id"
+   },
+   {
+    "name": "ix_documents_retention_until",
+    "detail": "retention_until"
+   }
+  ]
+ },
+ {
+  "name": "extracted_facts",
+  "ko": "추출 사실",
+  "comment": "1차 추론이 추출한 사실·근거 위치와 사용자 확인 결과(ai_value_text 에 AI 원래 값 보존)",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "check_session_id",
+    "ko": "점검 세션 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "check_sessions.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "check_sessions.id"
+   },
+   {
+    "name": "fact_key",
+    "ko": "사실 항목",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "필수 8항목 등(CONTRACT_DATE, PAYMENT_METHOD …)"
+   },
+   {
+    "name": "value_text",
+    "ko": "값(원문)",
+    "type": "TEXT",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "사용자에게 보이는 값. UNKNOWN 이면 NULL"
+   },
+   {
+    "name": "value_normalized",
+    "ko": "정규화 값",
+    "type": "JSONB",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "{\"date\":\"2026-03-02\"}, {\"amount\":720000,\"currency\":\"KRW\"} 등"
+   },
+   {
+    "name": "source_kind",
+    "ko": "근거 유형",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "DOCUMENT(원문)/STATEMENT(진술)/UNKNOWN(미확인)"
+   },
+   {
+    "name": "document_id",
+    "ko": "출처 문서 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "documents.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "근거가 문서일 때 필수"
+   },
+   {
+    "name": "page_no",
+    "ko": "페이지",
+    "type": "INTEGER",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "출처 페이지 번호(1부터)"
+   },
+   {
+    "name": "offset_start",
+    "ko": "시작 오프셋",
+    "type": "INTEGER",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "원문 문자 위치(0부터)"
+   },
+   {
+    "name": "offset_end",
+    "ko": "끝 오프셋",
+    "type": "INTEGER",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "원문 문자 위치(시작 이상)"
+   },
+   {
+    "name": "source_span",
+    "ko": "출처 구절",
+    "type": "TEXT",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "근거가 된 원문 일부"
+   },
+   {
+    "name": "status",
+    "ko": "확인 상태",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "EXTRACTED",
+    "comment": "EXTRACTED/CONFIRMED/MODIFIED/REJECTED (CONFIRMED·MODIFIED = 승인된 사실)"
+   },
+   {
+    "name": "has_conflict",
+    "ko": "충돌 여부",
+    "type": "BOOLEAN",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "false",
+    "comment": "같은 항목에 다른 값이 있으면 true"
+   },
+   {
+    "name": "ai_value_text",
+    "ko": "AI 추출값",
+    "type": "TEXT",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "AI 가 처음 추출한 값(수정 후에도 변경하지 않음, AI-01). UNKNOWN 이면 NULL"
+   },
+   {
+    "name": "confirmed_by",
+    "ko": "확인자 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "users.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "users.id, 마지막으로 확인·수정·거부한 사용자"
+   },
+   {
+    "name": "confirmed_at",
+    "ko": "확인일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "마지막 확인 처리 시각. 처리 이력은 audit_logs(UPDATE)"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   },
+   {
+    "name": "updated_at",
+    "ko": "수정일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "마지막 변경 시각"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_offset_range",
+    "detail": "offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_unknown_has_no_value",
+    "detail": "(source_kind = 'UNKNOWN') = (value_text IS NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_confirmation_complete",
+    "detail": "(status = 'EXTRACTED') = (confirmed_at IS NULL) AND (confirmed_at IS NULL) = (confirmed_by IS NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_page_no_positive",
+    "detail": "page_no IS NULL OR page_no >= 1"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_document_source_required",
+    "detail": "source_kind <> 'DOCUMENT' OR document_id IS NOT NULL"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_extracted_facts_document_same_session",
+    "detail": "(document_id, check_session_id) → (documents.id, documents.check_session_id) (삭제 시 CASCADE)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_offset_pair",
+    "detail": "(offset_start IS NULL) = (offset_end IS NULL)"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_extracted_facts_check_session_id_fact_key",
+    "detail": "check_session_id, fact_key"
+   }
+  ]
+ },
+ {
+  "name": "inspection_reports",
+  "ko": "점검 보고서",
+  "comment": "3분류 점검 보고서(버전 관리, 승인 후 본문 불변). 항목·인용·검증 결과는 items JSON",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "check_session_id",
+    "ko": "점검 세션 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "check_sessions.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "check_sessions.id"
+   },
+   {
+    "name": "version",
+    "ko": "버전",
+    "type": "INTEGER",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "세션별 1부터 증가"
+   },
+   {
+    "name": "status",
+    "ko": "상태",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "DRAFT",
+    "comment": "DRAFT/APPROVED/SUPERSEDED"
+   },
+   {
+    "name": "summary_text",
+    "ko": "요약",
+    "type": "TEXT",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "보고서 머리 요약"
+   },
+   {
+    "name": "items",
+    "ko": "보고서 항목",
+    "type": "JSONB",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "JSON 배열(구 report_items·report_citations): 분류·내용·연결 사실·보류 사유·인용(청크 ID·인용문·검증 결과·인용 당시 출처 제목/URL/시행일)"
+   },
+   {
+    "name": "approved_at",
+    "ko": "승인일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "사용자 최종 확인 시각"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "UNIQUE",
+    "name": "uq_inspection_reports_check_session_id_version",
+    "detail": "check_session_id, version"
+   },
+   {
+    "kind": "UNIQUE",
+    "name": "uq_inspection_reports_id_check_session_id",
+    "detail": "id, check_session_id"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_inspection_reports_version_positive",
+    "detail": "version >= 1"
+   }
+  ],
+  "indexes": []
+ },
+ {
+  "name": "cases",
+  "ko": "사건",
+  "comment": "시민의 분쟁 사건. 점검 전환이면 origin_session_id(UNIQUE), 신규 직행이면 NULL. 확인 사실 스냅샷·미확인 정보·상담 준비자료는 컬럼(JSON)으로 보관",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "owner_id",
+    "ko": "소유자 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "users.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "users.id"
+   },
+   {
+    "name": "title",
+    "ko": "사건 제목",
+    "type": "VARCHAR(100)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "2~100자"
+   },
+   {
+    "name": "case_type",
+    "ko": "사건 유형",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "FITNESS_REFUND/OTHER_CONSUMER"
+   },
+   {
+    "name": "status",
+    "ko": "상태",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "OPEN",
+    "comment": "OPEN/PREPARING/CONSULTING/CLOSED"
+   },
+   {
+    "name": "origin_session_id",
+    "ko": "원본 점검 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK",
+     "UQ"
+    ],
+    "fk": "check_sessions.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "전환 출처(UNIQUE: 점검 1건 → 사건 최대 1건), 신규 사건은 NULL"
+   },
+   {
+    "name": "business_name",
+    "ko": "상대 사업자명",
+    "type": "VARCHAR(100)",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "상대 사업자명"
+   },
+   {
+    "name": "thread_id",
+    "ko": "AI 스레드 ID",
+    "type": "VARCHAR(64)",
+    "nullable": true,
+    "keys": [
+     "UQ"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "사건에서 시작한 LangGraph thread_id(신규 직행 포함). 구 agent_threads 대체"
+   },
+   {
+    "name": "verified_facts",
+    "ko": "확인 사실",
+    "type": "JSONB",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "사건의 정본 사실 묶음 JSON(키·값·근거 유형·fact_id). 구 verified_snapshots.payload"
+   },
+   {
+    "name": "snapshot_version",
+    "ko": "스냅샷 버전",
+    "type": "INTEGER",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "확인 사실 버전(전환 시 1). 버전 변경 이력은 audit_logs"
+   },
+   {
+    "name": "snapshot_report_id",
+    "ko": "근거 보고서 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "inspection_reports.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "스냅샷을 만든 승인 보고서(원본 점검의 보고서만, v0.8 복합 FK). 신규 사건 직행이면 NULL"
+   },
+   {
+    "name": "snapshot_approved_at",
+    "ko": "스냅샷 승인일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "사용자가 사실을 승인한 시각"
+   },
+   {
+    "name": "unverified_items",
+    "ko": "미확인 정보",
+    "type": "JSONB",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "'[]'",
+    "comment": "JSON 배열[{id, content, status, resolved_at}]. 구 unverified_items 테이블"
+   },
+   {
+    "name": "consultation_prep",
+    "ko": "상담 준비자료",
+    "type": "JSONB",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "최신본 JSON{version, status, agency_code, summary_text, checklist, questions, created_at}. 구 consultation_preps"
+   },
+   {
+    "name": "closed_at",
+    "ko": "종결일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "종결일시"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   },
+   {
+    "name": "updated_at",
+    "ko": "수정일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "마지막 변경 시각"
+   },
+   {
+    "name": "deleted_at",
+    "ko": "삭제일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "논리 삭제 시각. 값이 있으면 조회에서 제외, 파기 배치 대상"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "CHECK",
+    "name": "ck_cases_snapshot_complete",
+    "detail": "(verified_facts IS NULL) = (snapshot_version IS NULL) AND (verified_facts IS NULL) = (snapshot_approved_at IS NULL)"
+   },
+   {
+    "kind": "UNIQUE",
+    "name": "uq_cases_id_owner_id",
+    "detail": "id, owner_id"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_cases_origin_session_owner",
+    "detail": "(origin_session_id, owner_id) → (check_sessions.id, check_sessions.user_id)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_cases_snapshot_report_needs_origin",
+    "detail": "snapshot_report_id IS NULL OR origin_session_id IS NOT NULL"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_cases_snapshot_version_positive",
+    "detail": "snapshot_version IS NULL OR snapshot_version >= 1"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_cases_snapshot_report_same_session",
+    "detail": "(snapshot_report_id, origin_session_id) → (inspection_reports.id, inspection_reports.check_session_id)"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_cases_owner_id_status",
+    "detail": "owner_id, status"
+   }
+  ]
+ },
+ {
+  "name": "case_events",
+  "ko": "사건 타임라인",
+  "comment": "사건 타임라인(언제·누가·무엇을)",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "case_id",
+    "ko": "사건 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "cases.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "cases.id"
+   },
+   {
+    "name": "occurred_on",
+    "ko": "발생일",
+    "type": "DATE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "미래 날짜 불가"
+   },
+   {
+    "name": "actor",
+    "ko": "행위 주체",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "USER/BUSINESS/AGENCY/OTHER"
+   },
+   {
+    "name": "title",
+    "ko": "내용 제목",
+    "type": "VARCHAR(200)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "예: 해지·환불 요청"
+   },
+   {
+    "name": "description",
+    "ko": "상세 내용",
+    "type": "TEXT",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "상세 내용"
+   },
+   {
+    "name": "is_verified",
+    "ko": "사용자 확인 여부",
+    "type": "BOOLEAN",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "false",
+    "comment": "사용자 확인 여부"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "UNIQUE",
+    "name": "uq_case_events_id_case_id",
+    "detail": "id, case_id"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_case_events_case_id_occurred_on",
+    "detail": "case_id, occurred_on"
+   }
+  ]
+ },
+ {
+  "name": "evidences",
+  "ko": "증거",
+  "comment": "사건 증거 목록(보유·미보유·요청). 타임라인·문서는 같은 사건 것만 연결",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "case_id",
+    "ko": "사건 ID",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "FK"
+    ],
+    "fk": "cases.id",
+    "on_delete": "CASCADE",
+    "default": null,
+    "comment": "cases.id"
+   },
+   {
+    "name": "event_id",
+    "ko": "관련 타임라인 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "case_events.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "같은 사건의 case_events.id"
+   },
+   {
+    "name": "document_id",
+    "ko": "첨부 문서 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "documents.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "같은 사건의 documents.id"
+   },
+   {
+    "name": "evidence_type",
+    "ko": "증거 유형",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "CONTRACT/PAYMENT_RECEIPT/MESSAGE/CALL_RECORD/PHOTO/NOTICE/OTHER"
+   },
+   {
+    "name": "title",
+    "ko": "증거명",
+    "type": "VARCHAR(200)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "증거명"
+   },
+   {
+    "name": "description",
+    "ko": "설명",
+    "type": "TEXT",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "설명"
+   },
+   {
+    "name": "obtained_on",
+    "ko": "확보일",
+    "type": "DATE",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "확보일"
+   },
+   {
+    "name": "status",
+    "ko": "보유 상태",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "HELD/MISSING/REQUESTED"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   },
+   {
+    "name": "updated_at",
+    "ko": "수정일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "마지막 변경 시각"
+   }
+  ],
+  "constraints": [
+   {
+    "kind": "FK(복합)",
+    "name": "fk_evidences_document_same_case",
+    "detail": "(document_id, case_id) → (documents.id, documents.case_id)"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_evidences_event_same_case",
+    "detail": "(event_id, case_id) → (case_events.id, case_events.case_id)"
+   }
+  ],
+  "indexes": [
+   {
+    "name": "ix_evidences_case_id_status",
+    "detail": "case_id, status"
+   }
+  ]
+ },
+ {
+  "name": "audit_logs",
+  "ko": "감사 로그",
+  "comment": "민감 자원 생성·열람·수정·삭제·동의·파기·외부 AI 호출 감사 로그(수정·삭제 불가, 원문 미기록)",
+  "columns": [
+   {
+    "name": "id",
+    "ko": "식별자",
+    "type": "UUID",
+    "nullable": false,
+    "keys": [
+     "PK"
+    ],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "UUID v4 기본키(순번 노출 방지)"
+   },
+   {
+    "name": "actor_id",
+    "ko": "행위자 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [
+     "FK"
+    ],
+    "fk": "users.id",
+    "on_delete": null,
+    "default": null,
+    "comment": "시스템 작업은 NULL"
+   },
+   {
+    "name": "action",
+    "ko": "행위",
+    "type": "VARCHAR(30)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "CREATE/READ_SENSITIVE/UPDATE/DELETE/EXPORT/CONSENT/PURGE/AI_CALL"
+   },
+   {
+    "name": "target_type",
+    "ko": "대상 테이블",
+    "type": "VARCHAR(50)",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "대상 테이블"
+   },
+   {
+    "name": "target_id",
+    "ko": "대상 ID",
+    "type": "UUID",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "파기 후에도 남는 식별자(개인정보 아님)"
+   },
+   {
+    "name": "ip_hash",
+    "ko": "IP 해시",
+    "type": "VARCHAR(64)",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "원본 IP 대신 솔트 해시"
+   },
+   {
+    "name": "detail",
+    "ko": "상세",
+    "type": "JSONB",
+    "nullable": true,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": null,
+    "comment": "건수·코드만(AI_CALL: 노드·상태·외부 전송 여부·처리 근거·차단 코드). 원문 기록 금지"
+   },
+   {
+    "name": "created_at",
+    "ko": "생성일시",
+    "type": "TIMESTAMP WITH TIME ZONE",
+    "nullable": false,
+    "keys": [],
+    "fk": null,
+    "on_delete": null,
+    "default": "now()",
+    "comment": "행 생성 시각(UTC 저장, 화면은 KST)"
+   }
+  ],
+  "constraints": [],
+  "indexes": [
+   {
+    "name": "ix_audit_logs_actor_id_created_at",
+    "detail": "actor_id, created_at"
+   },
+   {
+    "name": "ix_audit_logs_created_at",
+    "detail": "created_at"
+   },
+   {
+    "name": "ix_audit_logs_target_type_target_id",
+    "detail": "target_type, target_id"
+   }
+  ]
+ }
+]
