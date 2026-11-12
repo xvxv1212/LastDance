@@ -625,7 +625,7 @@ _OK_FACT = "결제 금액 600,000원"
 )
 def test_sup02_summary_outcome_assertion_rejected_even_with_verified_caution(ctx: Ctx, summary: str) -> None:
     sid, fid = _confirmed_session(ctx)
-    items = [
+    items: list[dict[str, Any]] = [
         {"category": "CONFIRMED_FACT", "content": _OK_FACT, "fact_id": fid},
         {
             "category": "CAUTION",
@@ -641,18 +641,18 @@ def test_sup02_summary_outcome_assertion_rejected_even_with_verified_caution(ctx
 def test_sup02_summary_legal_reference_needs_verified_caution(ctx: Ctx) -> None:
     sid, fid = _confirmed_session(ctx)
     summary = "소비자분쟁해결기준 별표 2의 관련 기준을 주의 항목으로 정리했습니다."
-    fact = {"category": "CONFIRMED_FACT", "content": _OK_FACT, "fact_id": fid}
-    cited = {
+    fact: dict[str, Any] = {"category": "CONFIRMED_FACT", "content": _OK_FACT, "fact_id": fid}
+    cited: dict[str, Any] = {
         "category": "CAUTION",
         "content": "환급 기준 비교 필요",
         "citations": [{"source_chunk_id": ctx.chunk_id, "quoted_text": "환급 기준"}],
     }
-    fake = {
+    fake: dict[str, Any] = {
         "category": "CAUTION",
         "content": "출처 재확인 필요",
         "citations": [{"source_chunk_id": "no-such#9", "quoted_text": "없는 문장"}],
     }
-    no_cite = {"category": "CAUTION", "content": "근거 미첨부"}
+    no_cite: dict[str, Any] = {"category": "CAUTION", "content": "근거 미첨부"}
     # 근거 항목이 없거나, 있어도 전부 보류(가짜 출처·인용 없음)이면 법령 언급 요약은 422
     for items in ([fact], [fact, fake], [fact, no_cite]):
         r = _report(ctx, ctx.user_a, str(sid), items, summary_text=summary)
