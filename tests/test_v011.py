@@ -538,3 +538,71 @@ def test_rag_candidate_spec_unchanged_and_settings_hash_separates_indexes() -> N
             E5, preprocessing="nfc", splitter="article/800/100", corpus_version="m1"
         ).identifier
     )
+
+
+# ---------------------------------------------------------------------------
+# 팀장 격리 UNKNOWN 패치의 SYN-001 관찰과 같은 조건(관찰값 대조용, 합성)
+#   알려진 4사실(대역 6회 → 진술 4회 수정 포함) + ACK 3건 + 근거 미첨부 보류 1건
+#   팀장 보고 기대: 초안 held_items=1, 전환 Snapshot 4, 미확인 4(ACK 3 + 보류 1), 날짜 이벤트 0
+# ---------------------------------------------------------------------------
+def test_syn001_text_flow_matches_lead_patch_observation(ctx: Ctx) -> None:
+    agree_all(ctx, ctx.user_a)
+    h = ctx.auth(ctx.user_a)
+    sid = ctx.client.post(
+        f"{API}/check-sessions",
+        headers=h,
+        json={
+            "entry_type": "REFUND_CONCERN",
+            "situation_text": "필라테스 6개월 600,000원, 4회 이용 후 환불 문의(합성)",
+        },
+    ).json()["id"]
+    facts = [
+        {"fact_key": "BUSINESS_NAME", "value_text": "필라테스(합성)", "source_kind": "STATEMENT"},
+        {"fact_key": "CONTRACT_PERIOD", "value_text": "6개월", "source_kind": "STATEMENT"},
+        {"fact_key": "PAYMENT_AMOUNT", "value_text": "600,000원", "source_kind": "STATEMENT"},
+        {"fact_key": "USED_SESSIONS", "value_text": "6회", "source_kind": "STATEMENT"},  # 의도적 대역 오류
+        {"fact_key": "CONTRACT_DATE", "source_kind": "UNKNOWN"},
+        {"fact_key": "CANCEL_REQUEST_DATE", "source_kind": "UNKNOWN"},
+        {"fact_key": "OTHER", "source_kind": "UNKNOWN"},  # 계약서 사본 보유 여부(PDF 미제출 ≠ 사본 없음)
+    ]
+    ids = ctx.client.post(
+        f"{API}/check-sessions/{sid}/facts", headers=ctx.svc(ctx.user_a), json={"facts": facts}
+    ).json()["ids"]
+    known, acks = ids[:4], ids[4:]
+    for fid in known[:3]:
+        assert _confirm(ctx, ctx.user_a, fid, action="CONFIRM").status_code == 200
+    assert _confirm(ctx, ctx.user_a, known[3], action="MODIFY", new_value="4회").status_code == 200
+    statuses = [
+        _confirm(ctx, ctx.user_a, fid, action="ACKNOWLEDGE_UNKNOWN").json()["session_status"] for fid in acks
+    ]
+    assert statuses == ["FACTS_EXTRACTED", "FACTS_EXTRACTED", "FACTS_CONFIRMED"]
+    items: list[dict[str, Any]] = [
+        {"category": "CONFIRMED_FACT", "content": c, "fact_id": f}
+        for c, f in zip(
+            ["필라테스(합성)", "계약기간 6개월", "결제 600,000원", "이용 4회"], known, strict=True
+        )
+    ]
+    items += [
+        {"category": "UNVERIFIED", "content": c, "fact_id": f}
+        for c, f in zip(
+            ["계약일 미확인", "해지 요청일 미확인", "계약서 사본 보유 여부 미확인"], acks, strict=True
+        )
+    ]
+    items.append(
+        {"category": "CAUTION", "content": "환급 기준은 공식 근거 확인 후 안내합니다."}
+    )  # NO_CITATION 보류
+    r = _report(ctx, ctx.user_a, sid, items)
+    assert r.status_code == 201 and r.json()["held_items"] == 1, r.text
+    assert ctx.client.post(f"{API}/reports/{r.json()['id']}/approval", headers=h).status_code == 204
+    c = ctx.client.post(
+        f"{API}/check-sessions/{sid}/case-conversion", headers=h, json={"title": "SYN-001(합성)"}
+    )
+    d = ctx.client.get(f"{API}/cases/{c.json()['id']}", headers=h).json()
+    snap = d["snapshot"]["facts"]
+    assert len(snap) == 4 and {f["fact_id"] for f in snap} == set(known)
+    assert next(f for f in snap if f["fact_id"] == known[3])["value"] == "4회"
+    assert len(d["unverified"]) == 4 and d["events"] == []
+    for fid in acks:
+        row = _fact_row(ctx, fid)
+        got = (row.status, row.value_text, row.ai_value_text, row.document_id, row.page_no, row.source_span)
+        assert got == ("ACKNOWLEDGED_UNKNOWN", None, None, None, None, None)
