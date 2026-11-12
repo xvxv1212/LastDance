@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,15 @@ def test_rls_url_needs_proven_isolation_even_when_target_matches(tmp_path: Path,
 def test_existing_database_or_symlink_cannot_be_reused(tmp_path: Path, as_symlink: bool) -> None:
     target = tmp_path / "test.db"
     if as_symlink:
-        target.symlink_to(tmp_path / "missing-target.db")
+        try:
+            target.symlink_to(tmp_path / "missing-target.db")
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip(
+                    "NOT RUN: Windows 심볼릭 링크 생성 권한 없음(WinError 1314); "
+                    "실제 링크 차단 검증 미실행."
+                )
+            raise
     else:
         target.write_text("existing data", encoding="utf-8")
     with pytest.raises(UnsafeTestDatabaseError, match="이미 있는 파일"):

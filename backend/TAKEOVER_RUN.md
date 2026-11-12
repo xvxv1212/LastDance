@@ -20,9 +20,9 @@ PR·CI·Merge를 이어갈 수 있다. 공용·운영 서버의 구체 대상은
 
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
+.\.venv\Scripts\python.exe -X utf8 -m pip install -r backend\requirements-dev.txt
 cd backend
-..\.venv\Scripts\python.exe -m scripts.run_syn001 --verify --output var/syn001_verify
+..\.venv\Scripts\python.exe -X utf8 -m scripts.run_syn001 --verify --output var/syn001_verify
 ```
 
 Python 3.11 이상이 필요하며 이번 검증 환경은 Python 3.12.14다.
@@ -33,7 +33,7 @@ Linux/macOS에서는 해당 가상환경의 `bin/python`을 사용한다.
 ## 이유림의 화면 연결
 
 ```powershell
-..\.venv\Scripts\python.exe -m scripts.run_syn001 --serve --port 8000 --output var/syn001_serve
+..\.venv\Scripts\python.exe -X utf8 -m scripts.run_syn001 --serve --port 8000 --output var/syn001_serve
 ```
 
 서버 주소는 `http://127.0.0.1:8000`, 전체 API 설명은 `/docs`다.
@@ -77,9 +77,24 @@ Linux/macOS에서는 해당 가상환경의 `bin/python`을 사용한다.
 ## 시험과 안전 경계
 
 ```powershell
-..\.venv\Scripts\python.exe -m pytest -q
-..\.venv\Scripts\python.exe -m ruff check .
+..\.venv\Scripts\python.exe -X utf8 -m pytest -q -ra
+..\.venv\Scripts\python.exe -X utf8 -m ruff check .
 ```
+
+### Windows에서 확인된 호환성 사항
+
+- `-X utf8`은 한국어 주석과 자료를 UTF-8로 읽도록 해당 Python 프로세스에 적용한다.
+- 인용 증거 디렉터리는 `.gitattributes`의 `-text`로 원본 바이트를 보존한다. 승인 기록의
+  SHA-256과 실제 파일을 대조하므로 Git이 LF를 CRLF로 바꾸면 인용이 보류된다.
+  기존 체크아웃에서 이미 바뀐 파일은 본문 변경 여부를 확인한 뒤 Git 원본 바이트로 복원해야 한다.
+  승인 해시를 바꾸거나 검증을 완화해서 통과시키지 않는다.
+- PDF는 `.gitattributes`의 `binary`로 줄바꿈 변환을 막는다. PDF의 내부 위치 정보는
+  바이트 단위이므로 텍스트 파일처럼 변환하면 읽기 경고가 발생할 수 있다.
+- 실제 심볼릭 링크 시험은 Windows의 링크 생성 권한 오류 `WinError 1314`일 때만
+  `NOT RUN` 사유와 함께 건너뛴다. 이 항목은 통과로 집계하지 않는다. Linux와 링크 생성이
+  가능한 Windows에서는 실제 링크 차단을 검증하며, 기존 파일 거부 시험은 계속 실행한다.
+- PostgreSQL 바이너리·pgvector·RLS가 필요한 시험의 `SKIPPED`는 해당 환경에서 미실행을 뜻한다.
+  로컬 SQLite 시험 결과를 PostgreSQL/RLS 통과로 보고하지 않는다.
 
 시험은 pytest가 만든 새 임시 SQLite만 허용한다. `HJ_TEST_DATABASE_URL` 또는
 `HJ_TEST_APP_DATABASE_URL`이 있으면 값을 출력하지 않고 DB 연결 전에 차단한다.
