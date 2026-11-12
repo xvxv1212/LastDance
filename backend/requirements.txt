@@ -1,7 +1,12 @@
+# 운영 의존성(정확한 버전 고정 → 재현 가능한 빌드, 취약점 점검 기준)
 fastapi==0.162.0
-uvicorn==0.54.0
-pydantic-settings==2.16.2
-python-multipart==0.0.33
-pypdf==6.21.4
+starlette==1.7.0
 SQLAlchemy==2.1.6
-psycopg2-binary==2.9.13
+pydantic==2.13.5
+PyJWT==2.15.0
+python-multipart==0.0.32
+psycopg[binary]==3.3.6
+uvicorn==0.54.0
+argon2-cffi==25.1.0   # v0.9 비밀번호 Argon2id 해시
+pypdf==6.21.4        # LastDance PDF 텍스트 추출 보존
+pydantic-settings==2.16.2  # LastDance PDF 크기/페이지·CORS 설정 보존
