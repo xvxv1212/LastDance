@@ -133,6 +133,11 @@
   "constraints": [
    {
     "kind": "CHECK",
+    "name": "ck_users_failed_login_count_non_negative",
+    "detail": "failed_login_count >= 0"
+   },
+   {
+    "kind": "CHECK",
     "name": "ck_users_login_required",
     "detail": "status = 'WITHDRAWN' OR (email IS NOT NULL AND password_hash IS NOT NULL)"
    },
@@ -140,11 +145,6 @@
     "kind": "CHECK",
     "name": "ck_users_withdrawn_has_no_identity",
     "detail": "status <> 'WITHDRAWN' OR (email IS NULL AND password_hash IS NULL AND display_name IS NULL AND deleted_at IS NOT NULL)"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_users_failed_login_count_non_negative",
-    "detail": "failed_login_count >= 0"
    }
   ],
   "indexes": []
@@ -545,11 +545,6 @@
   ],
   "constraints": [
    {
-    "kind": "UNIQUE",
-    "name": "uq_documents_id_check_session_id",
-    "detail": "id, check_session_id"
-   },
-   {
     "kind": "CHECK",
     "name": "ck_documents_page_count_positive",
     "detail": "page_count IS NULL OR page_count >= 1"
@@ -560,14 +555,19 @@
     "detail": "check_session_id IS NOT NULL OR case_id IS NOT NULL"
    },
    {
-    "kind": "FK(복합)",
-    "name": "fk_documents_session_owner",
-    "detail": "(check_session_id, owner_id) → (check_sessions.id, check_sessions.user_id) (삭제 시 CASCADE)"
-   },
-   {
     "kind": "CHECK",
     "name": "ck_documents_size_range",
     "detail": "size_bytes > 0 AND size_bytes <= 10485760"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_documents_case_owner",
+    "detail": "(case_id, owner_id) → (cases.id, cases.owner_id) (삭제 시 CASCADE)"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_documents_session_owner",
+    "detail": "(check_session_id, owner_id) → (check_sessions.id, check_sessions.user_id) (삭제 시 CASCADE)"
    },
    {
     "kind": "UNIQUE",
@@ -575,9 +575,9 @@
     "detail": "id, case_id"
    },
    {
-    "kind": "FK(복합)",
-    "name": "fk_documents_case_owner",
-    "detail": "(case_id, owner_id) → (cases.id, cases.owner_id) (삭제 시 CASCADE)"
+    "kind": "UNIQUE",
+    "name": "uq_documents_id_check_session_id",
+    "detail": "id, check_session_id"
    }
   ],
   "indexes": [
@@ -809,34 +809,9 @@
   ],
   "constraints": [
    {
-    "kind": "FK(복합)",
-    "name": "fk_extracted_facts_document_same_session",
-    "detail": "(document_id, check_session_id) → (documents.id, documents.check_session_id) (삭제 시 CASCADE)"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_page_no_positive",
-    "detail": "page_no IS NULL OR page_no >= 1"
-   },
-   {
     "kind": "CHECK",
     "name": "ck_extracted_facts_ack_only_unknown",
     "detail": "status <> 'ACKNOWLEDGED_UNKNOWN' OR source_kind = 'UNKNOWN'"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_offset_range",
-    "detail": "offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_offset_pair",
-    "detail": "(offset_start IS NULL) = (offset_end IS NULL)"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_extracted_facts_document_source_required",
-    "detail": "source_kind <> 'DOCUMENT' OR document_id IS NOT NULL"
    },
    {
     "kind": "CHECK",
@@ -845,8 +820,38 @@
    },
    {
     "kind": "CHECK",
+    "name": "ck_extracted_facts_document_source_required",
+    "detail": "source_kind <> 'DOCUMENT' OR document_id IS NOT NULL"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_offset_pair",
+    "detail": "(offset_start IS NULL) = (offset_end IS NULL)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_offset_range",
+    "detail": "offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_page_no_positive",
+    "detail": "page_no IS NULL OR page_no >= 1"
+   },
+   {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_unknown_has_no_source_detail",
+    "detail": "source_kind <> 'UNKNOWN' OR (value_normalized IS NULL AND ai_value_text IS NULL AND document_id IS NULL AND page_no IS NULL AND offset_start IS NULL AND offset_end IS NULL AND source_span IS NULL)"
+   },
+   {
+    "kind": "CHECK",
     "name": "ck_extracted_facts_unknown_has_no_value",
     "detail": "(source_kind = 'UNKNOWN') = (value_text IS NULL)"
+   },
+   {
+    "kind": "FK(복합)",
+    "name": "fk_extracted_facts_document_same_session",
+    "detail": "(document_id, check_session_id) → (documents.id, documents.check_session_id) (삭제 시 CASCADE)"
    }
   ],
   "indexes": [
@@ -956,6 +961,11 @@
   ],
   "constraints": [
    {
+    "kind": "CHECK",
+    "name": "ck_inspection_reports_version_positive",
+    "detail": "version >= 1"
+   },
+   {
     "kind": "UNIQUE",
     "name": "uq_inspection_reports_check_session_id_version",
     "detail": "check_session_id, version"
@@ -964,11 +974,6 @@
     "kind": "UNIQUE",
     "name": "uq_inspection_reports_id_check_session_id",
     "detail": "id, check_session_id"
-   },
-   {
-    "kind": "CHECK",
-    "name": "ck_inspection_reports_version_positive",
-    "detail": "version >= 1"
    }
   ],
   "indexes": []
@@ -1195,16 +1200,6 @@
     "detail": "(verified_facts IS NULL) = (snapshot_version IS NULL) AND (verified_facts IS NULL) = (snapshot_approved_at IS NULL)"
    },
    {
-    "kind": "UNIQUE",
-    "name": "uq_cases_id_owner_id",
-    "detail": "id, owner_id"
-   },
-   {
-    "kind": "FK(복합)",
-    "name": "fk_cases_origin_session_owner",
-    "detail": "(origin_session_id, owner_id) → (check_sessions.id, check_sessions.user_id)"
-   },
-   {
     "kind": "CHECK",
     "name": "ck_cases_snapshot_report_needs_origin",
     "detail": "snapshot_report_id IS NULL OR origin_session_id IS NOT NULL"
@@ -1216,8 +1211,18 @@
    },
    {
     "kind": "FK(복합)",
+    "name": "fk_cases_origin_session_owner",
+    "detail": "(origin_session_id, owner_id) → (check_sessions.id, check_sessions.user_id)"
+   },
+   {
+    "kind": "FK(복합)",
     "name": "fk_cases_snapshot_report_same_session",
     "detail": "(snapshot_report_id, origin_session_id) → (inspection_reports.id, inspection_reports.check_session_id)"
+   },
+   {
+    "kind": "UNIQUE",
+    "name": "uq_cases_id_owner_id",
+    "detail": "id, owner_id"
    }
   ],
   "indexes": [

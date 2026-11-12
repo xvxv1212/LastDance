@@ -345,6 +345,7 @@ CREATE TABLE extracted_facts (
 	CONSTRAINT ck_extracted_facts_offset_range CHECK (offset_start IS NULL OR (offset_start >= 0 AND offset_end >= offset_start)), 
 	CONSTRAINT ck_extracted_facts_confirmation_complete CHECK ((status = 'EXTRACTED') = (confirmed_at IS NULL) AND (confirmed_at IS NULL) = (confirmed_by IS NULL)), 
 	CONSTRAINT ck_extracted_facts_ack_only_unknown CHECK (status <> 'ACKNOWLEDGED_UNKNOWN' OR source_kind = 'UNKNOWN'), 
+	CONSTRAINT ck_extracted_facts_unknown_has_no_source_detail CHECK (source_kind <> 'UNKNOWN' OR (value_normalized IS NULL AND ai_value_text IS NULL AND document_id IS NULL AND page_no IS NULL AND offset_start IS NULL AND offset_end IS NULL AND source_span IS NULL)), 
 	CONSTRAINT fk_extracted_facts_document_same_session FOREIGN KEY(document_id, check_session_id) REFERENCES documents (id, check_session_id) ON DELETE CASCADE, 
 	CONSTRAINT fk_extracted_facts_check_session_id_check_sessions FOREIGN KEY(check_session_id) REFERENCES check_sessions (id) ON DELETE CASCADE, 
 	CONSTRAINT ck_extracted_facts_fact_key CHECK (fact_key IN ('CONTRACT_DATE', 'CONTRACT_PERIOD', 'PAYMENT_AMOUNT', 'PAYMENT_METHOD', 'TOTAL_SESSIONS', 'USED_SESSIONS', 'CANCEL_REQUEST_DATE', 'BUSINESS_NAME', 'BUSINESS_RESPONSE', 'REFUND_CLAUSE', 'OTHER')), 

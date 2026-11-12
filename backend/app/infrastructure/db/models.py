@@ -320,6 +320,16 @@ class ExtractedFactModel(Base):
         CheckConstraint(
             "status <> 'ACKNOWLEDGED_UNKNOWN' OR source_kind = 'UNKNOWN'", name="ack_only_unknown"
         ),
+        # v0.11.1(DB): 미확인(UNKNOWN) 사실에는 정규화 값·AI 최초값·문서·페이지·원문 위치·구절도 없어야 한다.
+        # 값(value_text)만 막으면 value_normalized 에 {"amount": 0} 같은 가짜 값이 저장될 수 있었다(재현됨).
+        # 승인 UNKNOWN 계약의 'UNKNOWN/null 유지'를 DB 에서도 보장한다. 값을 알게 되면 MODIFY 로
+        # 근거가 STATEMENT 로 바뀌므로 이 제약에 걸리지 않는다.
+        CheckConstraint(
+            "source_kind <> 'UNKNOWN' OR (value_normalized IS NULL AND ai_value_text IS NULL"
+            " AND document_id IS NULL AND page_no IS NULL AND offset_start IS NULL"
+            " AND offset_end IS NULL AND source_span IS NULL)",
+            name="unknown_has_no_source_detail",
+        ),
         # 출처 문서는 '같은 점검'에 올린 문서여야 한다(다른 사건 자료 혼입 금지)
         ForeignKeyConstraint(
             ["document_id", "check_session_id"],
