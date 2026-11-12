@@ -30,7 +30,7 @@ from tests.test_change_requests import _approved, _convert, _count, _session, _t
 # ---------------------------------------------------------------------------
 def _signup(ctx: Ctx, email: str, password: str = PASSWORD) -> int:
     r = ctx.client.post("/api/v1/auth/signup", json={"email": email, "password": password})
-    return r.status_code
+    return int(r.status_code)  # httpx/httpx2 어느 쪽이든 int 로 고정
 
 
 def _login(ctx: Ctx, email: str, password: str = PASSWORD) -> tuple[int, str | None, dict[str, str]]:
@@ -45,7 +45,8 @@ def _login(ctx: Ctx, email: str, password: str = PASSWORD) -> tuple[int, str | N
 
 
 def _withdraw(ctx: Ctx, headers: dict[str, str], password: str = PASSWORD) -> int:
-    return ctx.client.post("/api/v1/me/withdrawal", headers=headers, json={"password": password}).status_code
+    r = ctx.client.post("/api/v1/me/withdrawal", headers=headers, json={"password": password})
+    return int(r.status_code)
 
 
 def _user_row(ctx: Ctx, user_id: uuid.UUID) -> orm.UserModel | None:

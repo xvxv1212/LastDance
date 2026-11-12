@@ -23,7 +23,7 @@ API = "/api/v1"
 # ---------------------------------------------------------------------------
 def _signup(ctx: Ctx, email: str) -> int:
     r = ctx.client.post(f"{API}/auth/signup", json={"email": email, "password": PASSWORD})
-    return r.status_code
+    return int(r.status_code)  # httpx/httpx2 어느 쪽이든 int 로 고정
 
 
 def test_sup01_default_setting_is_closed() -> None:

@@ -37,7 +37,8 @@ def _facts(ctx: Ctx, user: uuid.UUID, sid: str, facts: list[dict]) -> list[str]:
 
 
 def _confirm(ctx: Ctx, user: uuid.UUID, fid: str, body: dict) -> int:  # type: ignore[type-arg]
-    return ctx.client.post(f"/api/v1/facts/{fid}/confirmation", headers=ctx.auth(user), json=body).status_code
+    r = ctx.client.post(f"/api/v1/facts/{fid}/confirmation", headers=ctx.auth(user), json=body)
+    return int(r.status_code)
 
 
 # ---------------------------------------------------------------------------
