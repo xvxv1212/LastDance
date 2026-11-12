@@ -606,3 +606,61 @@ def test_syn001_text_flow_matches_lead_patch_observation(ctx: Ctx) -> None:
         row = _fact_row(ctx, fid)
         got = (row.status, row.value_text, row.ai_value_text, row.document_id, row.page_no, row.source_span)
         assert got == ("ACKNOWLEDGED_UNKNOWN", None, None, None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# SUP-02 보강: 요약문으로 '근거 없는 법률 안내'를 우회하지 못한다
+# ---------------------------------------------------------------------------
+_OK_FACT = "결제 금액 600,000원"
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        "소비자분쟁해결기준에 따라 잔여 금액의 90%를 돌려받을 수 있습니다.",
+        "잔여 금액 300,000원을 환급받게 됩니다.",
+        "전액 환불 가능합니다.",
+        "이 건은 환불 대상입니다.",
+    ],
+)
+def test_sup02_summary_outcome_assertion_rejected_even_with_verified_caution(ctx: Ctx, summary: str) -> None:
+    sid, fid = _confirmed_session(ctx)
+    items = [
+        {"category": "CONFIRMED_FACT", "content": _OK_FACT, "fact_id": fid},
+        {
+            "category": "CAUTION",
+            "content": "환급 기준 비교 필요",
+            "citations": [{"source_chunk_id": ctx.chunk_id, "quoted_text": "환급 기준"}],
+        },
+    ]
+    r = _report(ctx, ctx.user_a, str(sid), items, summary_text=summary)
+    assert r.status_code == 422, r.text
+    assert _count(ctx, orm.InspectionReportModel) == 0
+
+
+def test_sup02_summary_legal_reference_needs_verified_caution(ctx: Ctx) -> None:
+    sid, fid = _confirmed_session(ctx)
+    summary = "소비자분쟁해결기준 별표 2의 관련 기준을 주의 항목으로 정리했습니다."
+    fact = {"category": "CONFIRMED_FACT", "content": _OK_FACT, "fact_id": fid}
+    cited = {
+        "category": "CAUTION",
+        "content": "환급 기준 비교 필요",
+        "citations": [{"source_chunk_id": ctx.chunk_id, "quoted_text": "환급 기준"}],
+    }
+    fake = {
+        "category": "CAUTION",
+        "content": "출처 재확인 필요",
+        "citations": [{"source_chunk_id": "no-such#9", "quoted_text": "없는 문장"}],
+    }
+    no_cite = {"category": "CAUTION", "content": "근거 미첨부"}
+    # 근거 항목이 없거나, 있어도 전부 보류(가짜 출처·인용 없음)이면 법령 언급 요약은 422
+    for items in ([fact], [fact, fake], [fact, no_cite]):
+        r = _report(ctx, ctx.user_a, str(sid), items, summary_text=summary)
+        assert r.status_code == 422, (items, r.text)
+    assert _count(ctx, orm.InspectionReportModel) == 0
+    # 서버가 검증한 '주의' 항목이 1건 이상이면 저장(보류 항목이 섞여 있어도 됨)
+    r = _report(ctx, ctx.user_a, str(sid), [fact, cited, fake], summary_text=summary)
+    assert r.status_code == 201 and r.json()["held_items"] == 1, r.text
+    # 법령을 언급하지 않는 일반 요약('방법에 따라' 같은 말 포함)은 근거 항목 없이도 저장
+    plain = "확인된 사실을 정리했습니다. 다음 방법에 따라 자료를 준비하세요."
+    assert _report(ctx, ctx.user_a, str(sid), [fact], summary_text=plain).status_code == 201

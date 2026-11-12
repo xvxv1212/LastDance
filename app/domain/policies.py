@@ -136,9 +136,39 @@ class ReportCompositionPolicy:
     def __init__(self, legal_policy: LegalExpressionPolicy) -> None:
         self._legal = legal_policy
 
+    # v0.11 SUP-02(요약문 전용): 요약문에는 인용을 붙일 자리가 없으므로 항목보다 좁게 허용한다.
+    # ① 환급·환불 '결과'를 말하는 문장은 인용이 있어도 요약에 쓰지 않는다(결과는 기관·당사자 확인 사항).
+    _SUMMARY_OUTCOME: tuple[re.Pattern[str], ...] = (
+        re.compile(r"(돌려|환급|환불)\s*받(을\s*수\s*있|게\s*됩니다|으실\s*수)"),
+        re.compile(r"\d[\d,.]*\s*(%|퍼센트|원)\S*\s*(을|를)?\s*(환급|환불|돌려)"),
+        re.compile(r"(환급|환불)\s*(대상|가능)\s*(입니다|이다|합니다)"),
+        re.compile(r"(전액|일부)\s*(환급|환불)"),
+    )
+    # ② 법령·기준을 언급하는 요약은, 같은 보고서에 서버가 검증한(보류 아님) '주의' 항목이 있을 때만 허용한다.
+    _SUMMARY_LEGAL_SOURCE = re.compile(
+        r"(법률|법령|기본법|거래법|판매법|규제법|민법|형법|시행령|시행규칙|고시|약관|분쟁\s*해결\s*기준|별표|제\s*\d+\s*조)"
+    )
+
     def validate_summary(self, summary_text: str) -> None:
-        """v0.11 SUP-02: 요약문도 항목과 같은 금지 표현 검사를 받는다(요약으로 우회 금지)."""
+        """v0.11 SUP-02: 요약문도 항목과 같은 금지 표현 검사 + 요약 전용 결과 단정 검사(저장 전)."""
         self._legal.validate(summary_text)
+        found = [p.pattern for p in self._SUMMARY_OUTCOME if p.search(summary_text)]
+        if found:
+            raise ValidationError("요약문에는 환급·환불 결과를 쓰지 않습니다(근거 항목·상담으로 확인).")
+
+    def validate_summary_grounding(self, summary_text: str, items: Iterable[ReportItem]) -> None:
+        """v0.11 SUP-02: 법령·기준을 언급한 요약은 검증된 '주의' 항목이 1건 이상일 때만 저장한다.
+
+        인용 검증(apply) 뒤에 부른다. 근거가 모두 보류이면 요약도 그 근거를 말할 수 없다.
+        """
+        if not self._SUMMARY_LEGAL_SOURCE.search(summary_text):
+            return
+        grounded = any(i.category == ReportCategory.CAUTION and not i.is_held for i in items)
+        if not grounded:
+            raise ValidationError(
+                "요약문이 법령·기준을 언급하지만 서버가 검증한 '주의' 항목이 없습니다."
+                " 근거 항목을 먼저 확인하세요."
+            )
 
     def apply(self, items: Iterable[ReportItem], facts: Iterable[ExtractedFact]) -> list[ReportItem]:
         """규칙 위반은 예외, 근거 부족은 hold_reason 을 채워 돌려준다."""

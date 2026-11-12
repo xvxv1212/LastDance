@@ -104,6 +104,7 @@ class SubmitInspectionReport:
             report_id = new_id()
             items = [self._build_item(i, order, chunks, now) for order, i in enumerate(cmd.items)]
             items = self._policy.apply(items, uow.facts.list_by_session(session.id))
+            self._policy.validate_summary_grounding(cmd.summary_text, items)  # v0.11 SUP-02
 
             report = InspectionReport(
                 id=report_id,
