@@ -43,6 +43,8 @@ GRANT SELECT, UPDATE, DELETE ON
 TO app_batch;
 GRANT INSERT ON audit_logs TO app_batch;
 -- v0.11: 파기 대기 기록은 파기 전용 롤만 다룬다(시민 앱 롤 app_rw·인증 롤 app_auth 는 권한 없음)
+-- 2026-11-12 공용 구조 채택 승인. 재적용 때 기존의 과한 권한도 회수한다.
+REVOKE ALL ON purge_tasks FROM PUBLIC, app_rw, app_auth;
 GRANT SELECT, INSERT, UPDATE, DELETE ON purge_tasks TO app_batch;
 GRANT SELECT, DELETE ON audit_logs TO app_batch;  -- v0.9 감사 로그 보관기간 파기(조회는 탈퇴 계정 빈 행 판정용)
 

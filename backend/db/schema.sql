@@ -1,6 +1,7 @@
 -- 권리채비 AI 업무 DB PostgreSQL 스키마 (models.py 에서 자동 생성, 직접 수정 금지)
 -- v0.6: 공식 지식(벡터)은 별도 벡터 지식 DB → pgvector 확장 불필요
 
+-- 2026-11-12 사용자 승인: purge_tasks 공용 DB 구조 채택. 운영 실행 여부는 별도 증거로 기록한다.
 CREATE TABLE purge_tasks (
 	id UUID NOT NULL, 
 	kind VARCHAR(30) NOT NULL, 

@@ -11,6 +11,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "psycopg[binary]>=3.1",   # 운영 DB(PostgreSQL) 드라이버
     "argon2-cffi>=23.1",      # v0.9 비밀번호 Argon2id 해시
+    "langgraph-checkpoint-postgres==3.2.0",
+    "langgraph-checkpoint==4.3.1",
 ]
 
 [project.optional-dependencies]

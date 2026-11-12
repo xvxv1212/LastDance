@@ -5,13 +5,19 @@ from __future__ import annotations
 import os
 import secrets
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from importlib.metadata import version
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import argon2
 import jwt
-from sqlalchemy import inspect, text
+import psycopg
+from psycopg import sql
+from psycopg.rows import dict_row
 from sqlalchemy.engine import Engine
 
 from app.application.ports.services import (
@@ -23,6 +29,9 @@ from app.application.ports.services import (
     ModelResult,
     PasswordHasher,
 )
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.postgres import PostgresSaver
 
 
 class SystemClock(Clock):
@@ -211,27 +220,98 @@ class NoCheckpointStore(CheckpointStore):
 
 
 class LangGraphCheckpointStore(CheckpointStore):
-    """LangGraph PostgresSaver 가 만드는 체크포인트 테이블에서 thread 단위로 삭제한다.
+    """검증된 PostgresSaver의 공개 계약으로 특정 thread를 삭제한다.
 
-    체크포인트 원본은 라이브러리 관리 테이블이라 업무 FK(CASCADE)로 지워지지 않는다.
-    따라서 파기 배치가 agent_threads 기준으로 이 어댑터를 호출해 따로 지운다(DB-04·05).
+    setup()은 DB 준비 시에만 명시적으로 호출한다. 파기는 스키마를 만들거나 고치지 않는다.
+    라이브러리 버전·전체 migration·필수 열이 맞지 않으면 DELETE_FAILED로 재시도 대기한다.
+    업무 DB의 FK(CASCADE)는 라이브러리 저장소에 적용되지 않으므로 별도 파기를 유지한다.
     """
 
+    POSTGRES_SAVER_VERSION = "3.2.0"
+    CHECKPOINT_VERSION = "4.3.1"
     TABLES = ("checkpoint_writes", "checkpoint_blobs", "checkpoints")
+    REQUIRED_COLUMNS: ClassVar[dict[str, set[str]]] = {
+        "checkpoint_migrations": {"v"},
+        "checkpoints": {
+            "thread_id", "checkpoint_ns", "checkpoint_id", "parent_checkpoint_id", "type",
+            "checkpoint", "metadata",
+        },
+        "checkpoint_blobs": {"thread_id", "checkpoint_ns", "channel", "version", "type", "blob"},
+        "checkpoint_writes": {
+            "thread_id", "checkpoint_ns", "checkpoint_id", "task_id", "idx", "channel", "type",
+            "blob", "task_path",
+        },
+    }
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
+    @contextmanager
+    def _saver(self) -> Iterator[tuple[psycopg.Connection[dict[str, Any]], PostgresSaver]]:
+        if self._engine.dialect.name != "postgresql":
+            raise CheckpointStoreUnavailableError("실제 PostgreSQL 체크포인트 연결이 필요합니다.")
+        try:
+            if (
+                version("langgraph-checkpoint-postgres") != self.POSTGRES_SAVER_VERSION
+                or version("langgraph-checkpoint") != self.CHECKPOINT_VERSION
+            ):
+                raise CheckpointStoreUnavailableError("검증된 체크포인트 라이브러리 버전과 다릅니다.")
+            from langgraph.checkpoint.postgres import PostgresSaver
+            from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+            # DSN은 내부 연결에만 사용한다. 오류·로그에 URL/비밀번호를 넣지 않는다.
+            dsn = self._engine.url.set(drivername="postgresql").render_as_string(hide_password=False)
+            with psycopg.connect(dsn, autocommit=True, prepare_threshold=0, row_factory=dict_row) as conn:
+                saver = PostgresSaver(conn, serde=JsonPlusSerializer(allowed_msgpack_modules=[]))
+                yield conn, saver
+        except CheckpointStoreUnavailableError:
+            raise
+        except Exception:
+            raise CheckpointStoreUnavailableError(
+                "체크포인트 연결·계약·삭제를 확인하지 못했습니다."
+            ) from None
+
+    def _verify_schema(self, conn: psycopg.Connection[dict[str, Any]], saver: PostgresSaver) -> None:
+        columns: dict[str, set[str]] = {}
+        rows = conn.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = ANY(%s)",
+            (list(self.REQUIRED_COLUMNS),),
+        ).fetchall()
+        for row in rows:
+            columns.setdefault(row["table_name"], set()).add(row["column_name"])
+        if any(
+            not required <= columns.get(table, set()) for table, required in self.REQUIRED_COLUMNS.items()
+        ):
+            raise CheckpointStoreUnavailableError("체크포인트 스키마가 없거나 필수 표·열이 불완전합니다.")
+        migrations = conn.execute("SELECT v FROM checkpoint_migrations ORDER BY v").fetchall()
+        if [row["v"] for row in migrations] != list(range(len(saver.MIGRATIONS))):
+            raise CheckpointStoreUnavailableError("체크포인트 migration 이력이 검증된 버전과 다릅니다.")
+
+    def setup(self) -> None:
+        """승인된 DB 준비 단계 전용. CONCURRENTLY 인덱스 때문에 외부 트랜잭션으로 감싸지 않는다."""
+        with self._saver() as (conn, saver):
+            saver.setup()
+            self._verify_schema(conn, saver)
+
     def delete_thread(self, thread_id: str) -> None:
-        existing = set(inspect(self._engine).get_table_names())
-        if not existing.intersection(self.TABLES):
-            # v0.11: 체크포인트 테이블이 하나도 안 보이면 '지울 것이 없다'가 아니라 '확인 불가'다
-            # (잘못된 DB 에 붙었을 수 있다). 성공으로 처리하지 않고 대기 작업으로 남긴다.
-            raise CheckpointStoreUnavailableError("체크포인트 테이블을 찾을 수 없습니다.")
-        with self._engine.begin() as conn:
+        if not thread_id:
+            raise CheckpointStoreUnavailableError("체크포인트 파기 대상이 비어 있습니다.")
+        with self._saver() as (conn, saver), conn.transaction():
+            self._verify_schema(conn, saver)
+            # 실제 라이브러리 계약을 사용한다. 실패 시 세 표 삭제와 잔존검사가 함께 롤백된다.
+            saver.delete_thread(thread_id)
             for table in self.TABLES:
-                if table in existing:  # 테이블명은 고정 목록에서만 가져오므로 SQL 주입 위험 없음
-                    conn.execute(text(f"DELETE FROM {table} WHERE thread_id = :tid"), {"tid": thread_id})  # noqa: S608  # nosec B608
+                row = conn.execute(
+                    sql.SQL("SELECT EXISTS (SELECT 1 FROM {} WHERE thread_id = %s) AS remaining").format(
+                        sql.Identifier(table)
+                    ),
+                    (thread_id,),
+                ).fetchone()
+                if row is None or row["remaining"]:
+                    raise CheckpointStoreUnavailableError(
+                        "대상 체크포인트가 남아 있어 파기를 완료하지 못했습니다."
+                    )
 
 
 class DisabledModelClient(ExternalModelClient):

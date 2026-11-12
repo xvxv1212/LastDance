@@ -228,11 +228,13 @@ def test_langgraph_store_does_not_silently_succeed_without_tables(tmp_path: Path
         for table in LangGraphCheckpointStore.TABLES:
             conn.execute(text(f"CREATE TABLE {table} (thread_id TEXT, payload TEXT)"))
             conn.execute(text(f"INSERT INTO {table} VALUES ('t-1','a'), ('t-2','b')"))  # noqa: S608  # nosec B608 - 고정 목록
-    store.delete_thread("t-1")
+    # 실제 PostgreSQL·공식 setup이 없는 SQLite 가짜 표는 완전한 연결 증거가 아니다.
+    with pytest.raises(CheckpointStoreUnavailableError):
+        store.delete_thread("t-1")
     with engine.connect() as conn:
         for table in LangGraphCheckpointStore.TABLES:
             found: list[Any] = list(conn.execute(text(f"SELECT thread_id FROM {table}")).scalars())  # noqa: S608  # nosec B608
-            assert found == ["t-2"]
+            assert found == ["t-1", "t-2"]
     engine.dispose()
 
 
