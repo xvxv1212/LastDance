@@ -6,3 +6,5 @@ var/
 .venv/
 .env
 *.db
+# 백엔드 로컬 실행 결과 및 시험용 인증정보
+/backend/var/
