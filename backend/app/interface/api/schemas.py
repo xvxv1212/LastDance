@@ -215,6 +215,29 @@ class PrepOut(BaseModel):
     version: int  # 상담 준비자료 버전(사건별 1부터)
 
 
+class PrepChecklistItemOut(BaseModel):
+    evidence_id: uuid.UUID
+    title: str
+    type: enums.EvidenceType
+    status: enums.EvidenceStatus
+    ready: bool
+
+
+class PrepDetailOut(BaseModel):
+    """사건에 저장된 최신 상담 준비자료. 과거 버전 목록이나 재생성 결과가 아니다."""
+
+    case_id: uuid.UUID
+    version: int
+    status: enums.PrepStatus
+    summary_text: str
+    checklist: list[PrepChecklistItemOut]
+    questions: list[str]
+    created_at: datetime
+    agency_code: str | None
+    agency_name: str | None
+    approved_at: datetime | None
+
+
 class EventOut(BaseModel):
     id: uuid.UUID
     occurred_on: date

@@ -421,6 +421,32 @@ def prepare_consultation(
     return schemas.PrepOut(case_id=case_id, version=c.prepare_consultation().execute(cmd))
 
 
+@router.get(
+    "/cases/{case_id}/consultation-preps",
+    response_model=schemas.PrepDetailOut,
+    tags=["상담 준비"],
+)
+def get_consultation_prep(
+    case_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    c: Container = Depends(user_container),
+) -> schemas.PrepDetailOut:
+    """시민 본인의 최신 상담 준비자료를 그대로 조회한다. 미생성·타인·삭제 자료는 404다."""
+    prep = c.get_consultation_prep().execute(user_id, case_id)
+    return schemas.PrepDetailOut(
+        case_id=case_id,
+        version=prep.version,
+        status=prep.status,
+        summary_text=prep.summary_text,
+        checklist=[schemas.PrepChecklistItemOut(**item) for item in prep.checklist],
+        questions=prep.questions,
+        created_at=prep.created_at,
+        agency_code=prep.agency_code,
+        agency_name=prep.agency_name,
+        approved_at=prep.approved_at,
+    )
+
+
 # =============================================================================
 # AI 실행 스레드
 # =============================================================================

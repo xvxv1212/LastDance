@@ -190,6 +190,9 @@ class Container:
     def prepare_consultation(self) -> uc_case.PrepareConsultation:
         return uc_case.PrepareConsultation(self._uow(), self.clock, self._legal, self.agencies)
 
+    def get_consultation_prep(self) -> uc_case.GetConsultationPrep:
+        return uc_case.GetConsultationPrep(self._uow(), self.clock)
+
     def get_case_detail(self) -> uc_case.GetCaseDetail:
         return uc_case.GetCaseDetail(self._uow(), self.clock)
 

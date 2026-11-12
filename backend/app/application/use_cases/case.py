@@ -39,7 +39,13 @@ from app.domain.enums import (
     PrepStatus,
     ReportCategory,
 )
-from app.domain.errors import ConflictError, DuplicateError, NotFoundError, ValidationError
+from app.domain.errors import (
+    AuthenticationError,
+    ConflictError,
+    DuplicateError,
+    NotFoundError,
+    ValidationError,
+)
 from app.domain.policies import LegalExpressionPolicy, UploadPolicy
 
 
@@ -563,6 +569,40 @@ class PrepareConsultation:
             and fact["value"].strip()
             and fact.get("source_kind") in (FactSourceKind.DOCUMENT, FactSourceKind.STATEMENT)
         ]
+
+
+class GetConsultationPrep:
+    """본인 사건에 저장된 최신 상담 준비자료만 읽는다. 재생성하거나 승인하지 않는다."""
+
+    def __init__(self, uow: UnitOfWork, clock: Clock) -> None:
+        self._uow = uow
+        self._clock = clock
+
+    def execute(self, user_id: uuid.UUID, case_id: uuid.UUID) -> ConsultationPrep:
+        with self._uow as uow:
+            # 동일 프로세스에서 재사용하더라도 탈퇴·휴면·삭제 계정을 통과시키지 않는다.
+            user = uow.users.get(user_id)
+            if user is None or not user.is_active or user.deleted_at is not None:
+                raise AuthenticationError("인증이 필요합니다.")
+            try:
+                case = _load_owned_case(uow, case_id, user_id)
+            except NotFoundError:
+                raise NotFoundError("상담 준비자료를 찾을 수 없습니다.") from None
+            prep = case.consultation_prep
+            if prep is None:
+                # 없는 사건·타인 사건·삭제된 사건과 같은 응답으로 존재 여부를 숨긴다.
+                raise NotFoundError("상담 준비자료를 찾을 수 없습니다.")
+            audit(
+                uow,
+                self._clock,
+                user_id,
+                AuditAction.READ_SENSITIVE,
+                "cases.consultation_prep",
+                case.id,
+                {"version": prep.version},
+            )
+            uow.commit()
+        return prep
 
 
 # ===========================================================================
