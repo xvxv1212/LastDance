@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import contracts
 from app.application.ports.services import CheckpointStore, KnowledgeBase
 from app.application.use_cases.account import LoginLockPolicy
 from app.application.use_cases.agent import RetentionPolicy
@@ -27,6 +28,16 @@ from app.infrastructure.services import (
 )
 from app.interface.api.error_handlers import register_error_handlers
 from app.interface.api.routers import router
+from app.legacy_settings import get_settings
+
+
+def _include_legacy_routes(app: FastAPI) -> None:
+    """LastDance의 기존 상태 확인과 파일 미저장 PDF 추출 계약을 보존한다."""
+    app.include_router(contracts.router)
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
 
 
 def create_app(container: Container, cors_origins: tuple[str, ...] = ()) -> FastAPI:
@@ -43,7 +54,30 @@ def create_app(container: Container, cors_origins: tuple[str, ...] = ()) -> Fast
         )
     register_error_handlers(app)
     app.include_router(router)
+    _include_legacy_routes(app)
     return app
+
+
+def create_legacy_app() -> FastAPI:
+    """기존 app.main:app 진입점은 DB 설정 없이 상태 확인·PDF 추출만 제공한다."""
+    legacy = FastAPI(
+        title="권리채비 AI API",
+        description="헬스장·필라테스 회원권 해지·환불 상황의 사실 정리와 상담 준비를 돕는 API. "
+        "법률 결론이나 환불액을 판정하지 않는다.",
+        version="0.1.0",
+    )
+    legacy.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_origin_list,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    _include_legacy_routes(legacy)
+    return legacy
+
+
+# 기존 LastDance 실행 명령 유지. 전체 API는 명시적 컨테이너/설정으로만 조립한다.
+app = create_legacy_app()
 
 
 def build_container(settings: Settings | None = None) -> Container:

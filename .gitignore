@@ -3,3 +3,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 var/
+.venv/
+.env
+*.db

@@ -134,7 +134,10 @@ class ConvertSessionToCase:
         now: datetime,
     ) -> uuid.UUID:
         """한 트랜잭션: 사건 생성(Snapshot v1·미확인 포함) → 증거·타임라인 복사 → 점검 상태 CONVERTED."""
-        facts = [f for f in uow.facts.list_by_session(session.id) if f.is_confirmed]
+        all_facts = uow.facts.list_by_session(session.id)
+        facts = [f for f in all_facts if f.is_confirmed]
+        if not facts or any(f.status == FactStatus.EXTRACTED for f in all_facts):
+            raise ConflictError("알려진 사실을 하나 이상 확인하고 모든 항목을 처리해야 합니다.")
         case = Case(
             id=new_id(),
             owner_id=cmd.user_id,
@@ -468,7 +471,9 @@ class PrepareConsultation:
         with self._uow as uow:
             case = _load_owned_case(uow, cmd.case_id, cmd.user_id)
             events = sorted(uow.case_records.list_events(case.id), key=lambda e: e.occurred_on)
-            if not events:
+            # FB02-F1: 날짜를 모르는 경우에도 사건 Snapshot에 알려진 사실이 있으면
+            # 상담 초안을 만든다. 날짜·이벤트를 임의로 생성하지 않는다.
+            if not events and not self._known_snapshot_facts(case):
                 raise ValidationError("타임라인이 1건 이상 있어야 상담 준비자료를 만들 수 있습니다.")
             agency = None
             if cmd.agency_code is not None:
@@ -521,7 +526,43 @@ class PrepareConsultation:
             lines.append(f"[상대 사업자] {case.business_name}")
         lines.append("[경위]")
         lines += [f"- {e.occurred_on.isoformat()} {e.title}" for e in events]
+        if not events:
+            lines.append("- 날짜 미확인: 확인된 날짜의 타임라인 기록이 없습니다.")
+            lines.append("[사용자가 확인한 사실]")
+            labels = {
+                FactKey.CONTRACT_DATE: "계약일",
+                FactKey.CONTRACT_PERIOD: "계약기간",
+                FactKey.PAYMENT_AMOUNT: "결제금액",
+                FactKey.PAYMENT_METHOD: "결제수단",
+                FactKey.TOTAL_SESSIONS: "총 이용횟수",
+                FactKey.USED_SESSIONS: "실제 이용횟수",
+                FactKey.CANCEL_REQUEST_DATE: "해지 요청일",
+                FactKey.BUSINESS_NAME: "사업자명",
+                FactKey.BUSINESS_RESPONSE: "사업자 답변",
+                FactKey.REFUND_CLAUSE: "환불 조항",
+                FactKey.OTHER: "그 밖의 사실",
+            }
+            for fact in PrepareConsultation._known_snapshot_facts(case):
+                label = labels.get(fact.get("key"), "사용자 확인 항목")
+                source = (
+                    "제출 문서·사용자 확인"
+                    if fact["source_kind"] == FactSourceKind.DOCUMENT
+                    else "사용자 진술"
+                )
+                lines.append(f"- {label}: {fact['value']} (출처: {source})")
         return "\n".join(lines)
+
+    @staticmethod
+    def _known_snapshot_facts(case: Case) -> list[dict[str, Any]]:
+        """승인 보고서에서 사건으로 옮긴 알려진 값만 사용한다. UNKNOWN은 질문에 남긴다."""
+        return [
+            fact
+            for fact in (case.verified_facts or {}).get("facts", [])
+            if isinstance(fact, dict)
+            and isinstance(fact.get("value"), str)
+            and fact["value"].strip()
+            and fact.get("source_kind") in (FactSourceKind.DOCUMENT, FactSourceKind.STATEMENT)
+        ]
 
 
 # ===========================================================================

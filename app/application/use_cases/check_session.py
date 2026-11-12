@@ -28,7 +28,7 @@ from app.domain.enums import (
     FactStatus,
     SessionStatus,
 )
-from app.domain.errors import NotFoundError, ValidationError
+from app.domain.errors import ConflictError, NotFoundError, ValidationError
 from app.domain.policies import PersonalInfoMasker, UploadPolicy
 
 
@@ -231,6 +231,20 @@ class RecordExtractedFacts:
             has_value = bool(f.value_text and f.value_text.strip())
             if f.source_kind == FactSourceKind.UNKNOWN and has_value:
                 raise ValidationError("미확인 항목에는 값을 넣지 않습니다(추정값 금지).")
+            if f.source_kind == FactSourceKind.UNKNOWN and any(
+                value is not None
+                for value in (
+                    f.value_text,
+                    f.value_normalized,
+                    f.document_id,
+                    f.page_no,
+                    f.offset_start,
+                    f.offset_end,
+                    f.source_span,
+                )
+            ):
+                # 모르는 값에 정규화값이나 원문 위치만 붙여도 근거가 있는 것처럼 보일 수 있다.
+                raise ValidationError("UNKNOWN 항목에는 값·정규화값·근거 위치를 넣지 않습니다.")
             if f.source_kind != FactSourceKind.UNKNOWN and not has_value:
                 raise ValidationError(
                     "근거가 있는 사실은 값이 필요합니다. 근거가 없으면 UNKNOWN 으로 보내세요."
@@ -306,6 +320,8 @@ class ConfirmFact:
                 raise NotFoundError("점검 기록을 찾을 수 없습니다.")
             session.ensure_owned_by(cmd.user_id)
 
+            if session.status not in (SessionStatus.FACTS_EXTRACTED, SessionStatus.FACTS_CONFIRMED):
+                raise ConflictError("보고서 승인 전의 점검 사실만 확인·수정할 수 있습니다.")
             fact.apply(cmd.action, cmd.new_value, cmd.user_id, now)
             uow.facts.save(fact)
             # 처리 '사실'(누가·언제·무엇을)은 감사 로그에 남긴다. 값 원문은 남기지 않는다.

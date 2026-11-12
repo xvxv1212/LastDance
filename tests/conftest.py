@@ -43,6 +43,7 @@ from app.infrastructure.services import (
 )
 from app.interface.api.dependencies import SCOPE_FACTS_WRITE, SCOPE_REPORTS_WRITE
 from app.main import create_app
+from tests.db_safety import isolated_database_url
 
 SECRET = "test-secret-key-that-is-at-least-32-chars!!"
 SERVICE_SECRET = "test-service-secret-different-from-citizen-key"
@@ -135,8 +136,8 @@ def _apply_rls(engine: Any, app_role: str) -> None:
 
 @pytest.fixture()
 def ctx(tmp_path: Path) -> Iterator[Ctx]:
-    # 기본은 SQLite. HJ_TEST_DATABASE_URL 을 주면 실제 PostgreSQL 에서 같은 테스트를 돌린다.
-    url = os.environ.get("HJ_TEST_DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
+    # 엔진 생성·drop_all/create_all 전에 격리를 확인한다. 외부 DB/RLS URL은 현재 차단한다.
+    url = isolated_database_url(tmp_path, os.environ)
     engine, factory = build_session_factory(url)
     if engine.dialect.name == "postgresql":
         # v0.6: 업무 DB 에는 vector 컬럼이 없으므로 pgvector 확장이 필요 없다

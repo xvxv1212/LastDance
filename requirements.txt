@@ -8,3 +8,5 @@ python-multipart==0.0.32
 psycopg[binary]==3.3.6
 uvicorn==0.54.0
 argon2-cffi==25.1.0   # v0.9 비밀번호 Argon2id 해시
+pypdf==6.21.4        # LastDance PDF 텍스트 추출 보존
+pydantic-settings==2.16.2  # LastDance PDF 크기/페이지·CORS 설정 보존

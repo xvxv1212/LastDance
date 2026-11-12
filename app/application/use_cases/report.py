@@ -12,7 +12,14 @@ from datetime import UTC, datetime
 from app.application.ports.services import Clock, KnowledgeBase, UnitOfWork
 from app.application.use_cases.common import audit
 from app.domain.entities import InspectionReport, ReportCitation, ReportItem, new_id
-from app.domain.enums import AuditAction, CitationCheck, ReportCategory, ReportStatus, SessionStatus
+from app.domain.enums import (
+    AuditAction,
+    CitationCheck,
+    FactStatus,
+    ReportCategory,
+    ReportStatus,
+    SessionStatus,
+)
 from app.domain.errors import ConflictError, NotFoundError
 from app.domain.policies import ChunkFacts, CitationVerifier, ReportCompositionPolicy
 
@@ -89,6 +96,10 @@ class SubmitInspectionReport:
             session.ensure_owned_by(cmd.user_id)
             if session.status not in (SessionStatus.FACTS_CONFIRMED, SessionStatus.REPORTED):
                 raise ConflictError("사실 승인이 끝난 뒤에 보고서를 만들 수 있습니다.")
+            # 세션의 상태값만 믿지 않고 실제 사실 목록도 같은 경계에서 다시 확인한다.
+            facts = uow.facts.list_by_session(session.id)
+            if any(f.status == FactStatus.EXTRACTED for f in facts) or not any(f.is_confirmed for f in facts):
+                raise ConflictError("알려진 사실을 하나 이상 확인하고 모든 항목을 처리해야 합니다.")
 
             if cmd.facts_confirmed_at is not None and (
                 session.facts_confirmed_at is None
@@ -103,7 +114,7 @@ class SubmitInspectionReport:
             chunks = self._knowledge.chunk_facts(wanted) if wanted else {}
             report_id = new_id()
             items = [self._build_item(i, order, chunks, now) for order, i in enumerate(cmd.items)]
-            items = self._policy.apply(items, uow.facts.list_by_session(session.id))
+            items = self._policy.apply(items, facts)
             self._policy.validate_summary_grounding(cmd.summary_text, items)  # v0.11 SUP-02
 
             report = InspectionReport(

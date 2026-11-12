@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.legacy_settings import get_settings as get_settings
+
 
 def _flag(value: str | None) -> bool:
     """켜짐으로 인정하는 값만 True. 비어 있거나 모르는 값은 False(닫힘이 기본)."""
