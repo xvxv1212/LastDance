@@ -15,6 +15,7 @@ from app.application.use_cases.account import LoginLockPolicy
 from app.application.use_cases.agent import RetentionPolicy
 from app.config import Settings
 from app.container import Container
+from app.infrastructure.citation_approval import ApprovedKnowledgeBase
 from app.infrastructure.db.engine import build_session_factory
 from app.infrastructure.knowledge import JsonAgencyDirectory, LocalKnowledgeBase
 from app.infrastructure.pgvector_knowledge import PgVectorKnowledgeBase
@@ -96,6 +97,8 @@ def build_container(settings: Settings | None = None) -> Container:
         knowledge = PgVectorKnowledgeBase(knowledge_engine)
     else:
         knowledge = LocalKnowledgeBase.from_json(settings.knowledge_path)
+    # 저장 성공·서버 원문 일치 검증과 팀 인용 승인을 구분한다.
+    knowledge = ApprovedKnowledgeBase.from_file(knowledge, settings.knowledge_approval_path)
     checkpoints: CheckpointStore | None = None  # None = 연결 안 됨(체크포인트 파기는 대기로 남는다)
     if settings.checkpoint_database_url:
         checkpoint_engine, _ = build_session_factory(settings.checkpoint_database_url)

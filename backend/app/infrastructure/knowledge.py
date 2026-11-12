@@ -122,6 +122,8 @@ class LocalKnowledgeBase(KnowledgeBase):
                 source_title=src.title,
                 source_url=src.url,
                 article_ref=chunk.article_ref,
+                source_id=src.id,
+                source_version=src.version_label,
             )
         return out
 

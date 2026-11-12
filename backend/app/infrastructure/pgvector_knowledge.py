@@ -104,7 +104,8 @@ class PgVectorKnowledgeBase(KnowledgeBase):
         if not chunk_ids:
             return {}
         sql = text(
-            "SELECT c.id, c.content, c.article_ref, s.is_active, s.effective_date, s.title, s.url "
+            "SELECT c.id, c.content, c.article_ref, s.is_active, s.effective_date, s.title, s.url, "
+            "s.id AS source_id, s.version_label AS source_version "
             "FROM knowledge.chunks c JOIN knowledge.sources s ON s.id = c.source_id "
             "WHERE c.id = ANY(:ids)"
         )
@@ -118,6 +119,8 @@ class PgVectorKnowledgeBase(KnowledgeBase):
                 source_title=r.title,
                 source_url=r.url,
                 article_ref=r.article_ref,
+                source_id=r.source_id,
+                source_version=r.source_version,
             )
             for r in rows
         }
@@ -137,6 +140,7 @@ class PgVectorKnowledgeBase(KnowledgeBase):
         주의: 이 결과는 '검색 후보'일 뿐이다. 인용 검증(CitationVerifier)을 대신하지 않으며,
         검색 점수·순위로 VERIFIED 를 만들지 않는다. active_only 는 '지금 유효한 출처' 기준이어서
         과거 시점 사건의 근거임을 증명하지 못한다(그 경우는 보류).
+        팀 인용 승인은 별도 ApprovedKnowledgeBase가 대조한다. 이 검색 후보 목록은 승인이 아니다.
         """
         if spec is None:
             raise ValueError(

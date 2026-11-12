@@ -210,7 +210,8 @@ class ReportCompositionPolicy:
 class ChunkFacts:
     """인용 검증에 필요한 청크 정보(벡터 지식 DB 에서 읽어 온 값).
 
-    제목·URL·조항은 검증에는 쓰지 않고, 보고서에 '인용 당시 출처'로 복사해 두는 용도다.
+    제목·URL·조항은 보고서의 '인용 당시 출처'로 보존한다. 생산 경로는 인용문 일치
+    검사 전에 별도 승인 어댑터에서 출처 ID·URL·버전과 본문 해시를 대조한다.
     """
 
     content: str
@@ -219,12 +220,16 @@ class ChunkFacts:
     source_title: str | None = None
     source_url: str | None = None
     article_ref: str | None = None
+    # 팀 인용 승인 대조용 출처 식별값. 기존 인용 판정 enum·API 응답은 바꾸지 않는다.
+    source_id: str | None = None
+    source_version: str | None = None
 
 
 class CitationVerifier:
     """인용이 '진짜 근거'인지 서버가 판정한다. 클라이언트·LLM 이 보낸 '검증됨' 값은 쓰지 않는다.
 
     판정 순서: ① 청크 실재 → ② 출처 활성(폐지·구버전 아님) → ③ 시행일 도래 → ④ 인용문이 원문에 존재
+    이 판정은 팀 인용 승인이나 개별 사건의 적용성 판단을 대체하지 않는다.
     """
 
     _WS = re.compile(r"\s+")

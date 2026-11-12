@@ -23,6 +23,9 @@ class Settings:
     cors_origins: tuple[str, ...] = ()
     # v0.6: 업무 DB 밖의 저장소(벡터 지식 DB 적재 원본, 지원기관 목록)
     knowledge_path: Path = Path("./data/knowledge/sources.json")
+    # 본문·출처 URL·버전·원문 대조·사용자 승인 증거가 연결된 서버 관리 파일.
+    # 파일이 없으면 저장된 자료가 있더라도 새 보고서의 인용은 허용하지 않는다.
+    knowledge_approval_path: Path = Path("./data/knowledge/approvals.json")
     # v0.9 결정 6(A안): 값이 있으면 pgvector 지식 DB(knowledge 스키마)를 읽는다. 비우면 JSON 파일(개발용)
     knowledge_database_url: str | None = None
     agencies_path: Path = Path("./data/agencies.json")
@@ -64,6 +67,9 @@ class Settings:
             document_retention_days=int(os.environ.get("HJ_RETENTION_DAYS", "180")),
             cors_origins=tuple(o for o in os.environ.get("HJ_CORS_ORIGINS", "").split(",") if o),
             knowledge_path=Path(os.environ.get("HJ_KNOWLEDGE_PATH", "./data/knowledge/sources.json")),
+            knowledge_approval_path=Path(
+                os.environ.get("HJ_KNOWLEDGE_APPROVAL_PATH", "./data/knowledge/approvals.json")
+            ),
             knowledge_database_url=os.environ.get("HJ_KNOWLEDGE_DATABASE_URL") or None,
             agencies_path=Path(os.environ.get("HJ_AGENCIES_PATH", "./data/agencies.json")),
             batch_database_url=os.environ.get("HJ_BATCH_DATABASE_URL") or None,

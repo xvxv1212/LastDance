@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "meaning": "서버 관리용 인용 승인 기록. 저장 성공 및 CitationVerifier.VERIFIED와 별도.",
+  "chunks": {
+    "kca-1372-phone-20261112#method": {
+      "chunk_id": "kca-1372-phone-20261112#method",
+      "source_id": "kca-1372-phone-20261112",
+      "source_url": "https://www.kca.go.kr/odr/pg/ma/cnsutInfo1.do",
+      "source_version": "snapshot-20261112-f42a4b336fe93868",
+      "content_sha256": "f42a4b336fe93868b25ec2e4dfce34197e05d080160be13f0fd50a400f1b1648",
+      "original_comparison": {
+        "verified": true,
+        "scope": "CHUNK_WITH_PARENT_CONTEXT",
+        "source_url": "https://www.kca.go.kr/odr/pg/ma/cnsutInfo1.do",
+        "source_version": "snapshot-20261112-f42a4b336fe93868",
+        "checked_on": "2026-11-12",
+        "official_published_version": null,
+        "version_kind": "RETRIEVAL_SNAPSHOT",
+        "version_note": "공식 발행 버전은 페이지에서 확인되지 않아 조회일과 본문SHA로 내부 스냅샷 버전을 부여함. 공식 개정번호 아님.",
+        "locator": "상담신청 방법 > 상담신청방법 > 전화상담 > 이용방법 (열람 표시 L172-L174)",
+        "excerpt_file": "evidence/kca_1372_phone_excerpt.txt",
+        "excerpt_sha256": "51f4ba6b79d283502e3a96a74854208b1a6b3c79a372f27637e4a810cd5cd4b9",
+        "retrieval_evidence": "공식 한국소비자원 페이지 직접 열람. 검색 결과 요약 대신 원문 해당 위치를 대조함."
+      },
+      "team_approval": {
+        "approved": true,
+        "approved_by": "이형민",
+        "approved_on": "2026-11-12",
+        "approved_at": null,
+        "source_url": "https://www.kca.go.kr/odr/pg/ma/cnsutInfo1.do",
+        "source_version": "snapshot-20261112-f42a4b336fe93868",
+        "content_sha256": "f42a4b336fe93868b25ec2e4dfce34197e05d080160be13f0fd50a400f1b1648",
+        "record_file": "evidence/user_approval_20261112_kca1372.json",
+        "record_sha256": "75ae9624fbb5b4899efe0932e21dfc7d2c355c873402c594798204f4caf4fbff"
+      },
+      "scope_note": "전화상담 연결 방법만. 상담 수용·피해구제 대상·접수·보상·환불 결과를 보장하지 않음."
+    }
+  }
+}
