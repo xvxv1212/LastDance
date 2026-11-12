@@ -31,7 +31,6 @@ from app.application.use_cases.account import SignUpCommand
 from app.container import Container
 from app.domain.enums import FactStatus, SessionStatus
 from app.domain.errors import NotFoundError
-from app.infrastructure.db import models as orm
 from app.infrastructure.db.base import Base
 from app.infrastructure.db.engine import build_session_factory
 from app.infrastructure.knowledge import JsonAgencyDirectory, LocalKnowledgeBase
@@ -474,7 +473,7 @@ class LocalRun:
             body={"title": "합성 SYN-001 날짜 미확인 상담 준비"},
         )
         cid = converted["id"]
-        self.request(
+        created_prep = self.request(
             "날짜0건 상담 초안 생성",
             "POST",
             f"{API}/cases/{cid}/consultation-preps",
@@ -482,17 +481,56 @@ class LocalRun:
             headers=self.headers,
             body={},
         )
+        require(created_prep == {"case_id": cid, "version": 1}, "기존 상담 준비 POST 응답 계약 불일치")
         case = self.request("사건 상세 확인", "GET", f"{API}/cases/{cid}", 200, headers=self.headers)
         require(case["events"] == [] and case["evidences"] == [], "가짜 이벤트/문서 생성됨")
         require(len(case["snapshot"]["facts"]) == 4, "사건 사실 Snapshot 수 불일치")
-        with self.factory() as session:
-            stored = session.get(orm.CaseModel, uuid.UUID(cid))
-            require(stored is not None and stored.consultation_prep is not None, "상담 초안 저장 실패")
-            consultation = stored.consultation_prep
-            require("날짜 미확인" in consultation["summary_text"], "날짜 미확인 표시 누락")
-            require("4회" in consultation["summary_text"], "알려진 사실 누락")
+        consultation = self.request(
+            "상담 화면용 저장자료 조회",
+            "GET",
+            f"{API}/cases/{cid}/consultation-preps",
+            200,
+            headers=self.headers,
+        )
+        require(
+            consultation["case_id"] == cid
+            and consultation["version"] == created_prep["version"]
+            and consultation["status"] == "DRAFT"
+            and consultation["approved_at"] is None,
+            "상담 조회 사건·버전·미승인 상태 불일치",
+        )
+        summary = consultation["summary_text"]
+        require("날짜 미확인" in summary, "날짜 미확인 표시 누락")
+        require("6회" not in summary and "사본 없음" not in summary, "대역 오류 또는 사본 없음 단정")
+        for fact in case["snapshot"]["facts"]:
+            require(f"{LABELS[fact['key']]}: {fact['value']}" in summary, "알려진 사실4건 본문 반영 실패")
+        unknown_questions = {
+            f"확인 필요: {LABELS[key]} 미확인" for key in ("CONTRACT_DATE", "CANCEL_REQUEST_DATE", "OTHER")
+        }
+        held_questions = {f"확인 필요: {item['content']}" for item in draft["items"] if item["hold_reason"]}
+        require(len(unknown_questions) == 3 and len(held_questions) == 1, "합성 질문 구성 불일치")
+        require(
+            len(consultation["questions"]) == 4
+            and set(consultation["questions"]) == unknown_questions | held_questions,
+            "모름질문3건·근거보류질문1건 보존 실패",
+        )
+        require(consultation["checklist"] == [], "PDF 미제출 사례에 가짜 자료 생성됨")
+        self.request(
+            "다른 시민의 상담자료 조회 차단",
+            "GET",
+            f"{API}/cases/{cid}/consultation-preps",
+            404,
+            headers=self.user_headers[1],
+        )
         write_json(
-            self.output / "consultation.json", {"observation": "실제 SQLite 저장 결과", "data": consultation}
+            self.output / "consultation.json",
+            {
+                "observation": "실제 localhost HTTP GET으로 읽은 저장된 상담 준비자료",
+                "direct_database_observation": False,
+                "unknown_questions_count": len(unknown_questions),
+                "held_evidence_questions_count": len(held_questions),
+                "data": consultation,
+            },
         )
         write_json(self.output / "case.json", case)
         report = self.request(
@@ -500,6 +538,10 @@ class LocalRun:
         )
         write_json(self.output / "report.json", report)
         self.check("날짜0건 상담201/사건Snapshot4건/가짜날짜0건", {"case_id": cid, "version": 1})
+        self.check(
+            "상담자료GET200·타사용자404/모름질문3건·근거보류질문1건",
+            {"case_id": cid, "version": consultation["version"], "data": "consultation.json의 실제 GET 응답"},
+        )
 
         # 오래된 초안은 별도 초기 상태에서 시험해 첫 SYN-001의 결과를 덮어쓰지 않는다.
         stale_context, stale_ids = self.seed("별도 오래된 초안 경계시험")
