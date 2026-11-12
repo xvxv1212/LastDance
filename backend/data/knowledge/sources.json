@@ -1,0 +1,25 @@
+{
+  "sources": [
+    {
+      "id": "kca-1372-phone-20261112",
+      "source_type": "AGENCY_GUIDE",
+      "title": "한국소비자원 전화상담 이용방법",
+      "issuer": "한국소비자원",
+      "url": "https://www.kca.go.kr/odr/pg/ma/cnsutInfo1.do",
+      "version_label": "snapshot-20261112-f42a4b336fe93868",
+      "is_active": true,
+      "effective_date": null,
+      "checked_on": "2026-11-12",
+      "local_file": "data/knowledge/evidence/kca_1372_phone_excerpt.txt"
+    }
+  ],
+  "chunks": [
+    {
+      "id": "kca-1372-phone-20261112#method",
+      "source_id": "kca-1372-phone-20261112",
+      "chunk_index": 0,
+      "content": "이용방법 : ☎ 국번 없이 1372(통화요금 발신자 부담)",
+      "article_ref": "상담신청 방법 > 전화상담 > 이용방법"
+    }
+  ]
+}

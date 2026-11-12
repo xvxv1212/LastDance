@@ -1,0 +1,5 @@
+# Preserve approval evidence exactly: its SHA-256 is checked before citation use.
+backend/data/knowledge/evidence/** -text
+
+# PDF offsets refer to byte positions. Never apply text line-ending conversion.
+*.pdf binary

@@ -1,0 +1,95 @@
+erDiagram
+    users {
+        UUID id PK
+        VARCHAR email UK "로그인 ID, 탈퇴 시 NULL"
+        VARCHAR password_hash "Argon2id, 탈퇴 시 NULL"
+        INTEGER failed_login_count "연속 실패(v0.9)"
+        TIMESTAMPTZ locked_until "잠금 해제 시각(v0.9)"
+        VARCHAR role
+        VARCHAR status "ACTIVE 아니면 API 거부"
+    }
+    user_consents {
+        UUID id PK
+        UUID user_id FK
+        VARCHAR consent_type
+        BOOLEAN agreed
+        TIMESTAMPTZ withdrawn_at
+    }
+    check_sessions {
+        UUID id PK
+        UUID user_id FK
+        VARCHAR status
+        TIMESTAMPTZ facts_confirmed_at
+        VARCHAR thread_id UK "구 agent_threads"
+    }
+    documents {
+        UUID id PK
+        UUID owner_id FK
+        UUID check_session_id FK
+        UUID case_id FK
+        DATE retention_until
+    }
+    extracted_facts {
+        UUID id PK
+        UUID check_session_id FK
+        VARCHAR fact_key
+        VARCHAR source_kind
+        UUID document_id FK
+        TEXT ai_value_text "AI 원래 값"
+        VARCHAR status "확인 결과(v0.8 confirm_action 삭제)"
+        UUID confirmed_by FK
+    }
+    inspection_reports {
+        UUID id PK
+        UUID check_session_id FK
+        INTEGER version
+        VARCHAR status
+        JSONB items "구 report_items+citations, 승인 후 불변(트리거)"
+    }
+    cases {
+        UUID id PK
+        UUID owner_id FK
+        UUID origin_session_id FK "UNIQUE NULL"
+        VARCHAR thread_id UK "구 agent_threads"
+        JSONB verified_facts "구 verified_snapshots"
+        INTEGER snapshot_version
+        UUID snapshot_report_id FK "같은 점검 보고서만(복합 FK)"
+        JSONB unverified_items "구 unverified_items"
+        JSONB consultation_prep "구 consultation_preps"
+    }
+    case_events {
+        UUID id PK
+        UUID case_id FK
+        DATE occurred_on
+        VARCHAR actor
+    }
+    evidences {
+        UUID id PK
+        UUID case_id FK
+        UUID event_id FK "같은 사건"
+        UUID document_id FK "같은 사건"
+        VARCHAR status
+    }
+    audit_logs {
+        UUID id PK
+        UUID actor_id FK
+        VARCHAR action "AI_CALL 포함"
+        VARCHAR target_type
+        JSONB detail "코드·건수만"
+    }
+    users ||--o{ user_consents : "동의 이력"
+    users ||--o{ check_sessions : "점검"
+    users ||--o{ cases : "사건"
+    users ||--o{ documents : "소유"
+    users ||--o{ audit_logs : "행위자"
+    check_sessions ||--o{ documents : "업로드"
+    check_sessions ||--o{ extracted_facts : "추출 사실"
+    check_sessions ||--o{ inspection_reports : "보고서 버전"
+    check_sessions |o--o| cases : "전환 1:1"
+    documents |o--o{ extracted_facts : "근거 문서"
+    inspection_reports |o--o{ cases : "스냅샷 근거(같은 점검)"
+    cases ||--o{ documents : "사건 첨부"
+    cases ||--o{ case_events : "타임라인"
+    cases ||--o{ evidences : "증거"
+    case_events |o--o{ evidences : "관련 사건"
+    documents |o--o{ evidences : "첨부 파일"

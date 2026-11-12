@@ -1,0 +1,3 @@
+# 새 로컬 시험 인스턴스 전용. pgserver를 운영 서버 의존성으로 넣지 않는다.
+-r requirements-dev.txt
+pgserver==0.1.4

@@ -1,0 +1,25 @@
+flowchart LR
+    subgraph RDB["업무 DB · PostgreSQL (10개 테이블)"]
+        direction TB
+        U["users · user_consents"]
+        C["check_sessions · documents · extracted_facts · inspection_reports"]
+        K["cases · case_events · evidences"]
+        A["audit_logs (AI_CALL 포함)"]
+    end
+    subgraph VDB["벡터 지식 DB (제품 미정)"]
+        direction TB
+        V["공식 출처 청크 + 임베딩<br/>메타데이터: URL·시행일·확인일·폐지 여부"]
+        F["원문 파일 (로컬 저장)"]
+    end
+    subgraph CFG["설정 파일"]
+        G["data/agencies.json<br/>지원기관 목록"]
+    end
+    subgraph LG["LangGraph 체크포인트"]
+        H["대화 원본·요약·노드 상태<br/>(thread_id 기준)"]
+    end
+    LOG["애플리케이션 로그<br/>토큰·지연시간"]
+    C -- "청크 ID 문자열 + 인용 당시 출처 사본<br/>(FK 없음)" --> V
+    K -- "agency_code + 기관명 사본" --> G
+    C -- "thread_id" --> H
+    K -- "thread_id" --> H
+    A -. "성능·비용은 감사 대상 아님" .-> LOG
