@@ -1,0 +1,24 @@
+{
+  "name": "gwonri-chaebi-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "권리채비 AI 시민 화면 S04·S07·S08 – SYN-001 로컬 API 연결 (개발용)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.23",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.4.1",
+    "typescript": "5.8.3",
+    "vite": "6.3.5"
+  }
+}
