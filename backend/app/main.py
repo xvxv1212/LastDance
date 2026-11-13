@@ -18,6 +18,7 @@ from app.container import Container
 from app.infrastructure.citation_approval import ApprovedKnowledgeBase
 from app.infrastructure.db.engine import build_session_factory
 from app.infrastructure.knowledge import JsonAgencyDirectory, LocalKnowledgeBase
+from app.infrastructure.openai_responses_model import configured_model_client
 from app.infrastructure.pgvector_knowledge import PgVectorKnowledgeBase
 from app.infrastructure.services import (
     JwtTokenVerifier,
@@ -84,6 +85,8 @@ app = create_legacy_app()
 def build_container(settings: Settings | None = None) -> Container:
     """환경설정으로 운영 컨테이너를 조립한다. API 서버와 운영자 명령(scripts/)이 같은 조립을 쓴다."""
     settings = settings or Settings.from_env()
+    # 명시적 opt-in 전에는 외부 모델이 항상 비활성. 잘못된 설정이면 DB 연결 전에 중단.
+    model_client = configured_model_client()
     _, factory = build_session_factory(settings.database_url)
     batch_factory = None
     if settings.batch_database_url:
@@ -110,6 +113,7 @@ def build_container(settings: Settings | None = None) -> Container:
         clock=SystemClock(),
         storage=LocalFileStorage(settings.storage_dir),
         token_verifier=JwtTokenVerifier(settings.jwt_secret),
+        model_client=model_client,
         retention_days=settings.document_retention_days,
         checkpoints=checkpoints,
         knowledge=knowledge,
