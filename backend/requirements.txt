@@ -12,3 +12,4 @@ pypdf==6.21.4        # LastDance PDF 텍스트 추출 보존
 pydantic-settings==2.16.2  # LastDance PDF 크기/페이지·CORS 설정 보존
 langgraph-checkpoint-postgres==3.2.0  # 실제 PostgresSaver setup/delete_thread 계약
 langgraph-checkpoint==4.3.1          # 위 저장소와 함께 검증한 직렬화·체크포인트 계약
+langgraph==1.2.20  # 실제 StateGraph 실행. 기존 checkpoint 4.3.1과 호환 계약

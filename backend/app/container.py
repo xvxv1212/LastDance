@@ -208,6 +208,16 @@ class Container:
             self._uow(), self.clock, self.model_client, self._masker, self._transfer_policy
         )
 
+    def guarded_model_graph(self):
+        """인증된 사용자 문맥에서만 실행하는 최소 LangGraph 연결."""
+        if self._acting_user_id is None:
+            raise RuntimeError("사용자 문맥에 묶이지 않은 AI 실행은 허용하지 않습니다.")
+        from app.agent.workflow import build_guarded_model_graph
+
+        return build_guarded_model_graph(
+            self.invoke_external_model(), user_id=self._acting_user_id
+        )
+
     def purge_expired_data(self) -> uc_agent.PurgeExpiredData:
         return uc_agent.PurgeExpiredData(
             SqlAlchemyUnitOfWork(self._batch_factory),
