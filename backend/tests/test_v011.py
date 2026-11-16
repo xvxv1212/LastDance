@@ -714,3 +714,41 @@ def test_db_check_allows_unknown_fact_after_user_supplies_value(ctx: Ctx) -> Non
         )
         s.commit()
     assert _fact_row(ctx, unknown[0]).value_normalized == {"date": "2026-05-10"}
+
+
+# ---------------------------------------------------------------------------
+# v0.11.2(DB 초안): 미확인 사실의 상태 제한(팀장 unknown_status 와 같은 조건) — DB 제약만 시험
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("status", ["CONFIRMED", "MODIFIED"])
+def test_db_check_unknown_fact_cannot_be_confirmed_without_value(ctx: Ctx, status: str) -> None:
+    """앱을 거치지 않고 DB 에 직접 써도 '값 없는 확인 사실'(UNKNOWN+CONFIRMED/MODIFIED)은 저장 불가."""
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    _, _, unknown = _session_with_unknown(ctx, ctx.user_a)
+    with ctx.factory() as s, pytest.raises(IntegrityError):
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(status=status, confirmed_by=ctx.user_a, confirmed_at=ctx.clock.now())
+        )
+        s.commit()
+    row = _fact_row(ctx, unknown[0])
+    assert (row.source_kind, row.status, row.value_text) == ("UNKNOWN", "EXTRACTED", None)
+
+
+@pytest.mark.parametrize("status", ["REJECTED", "ACKNOWLEDGED_UNKNOWN"])
+def test_db_check_unknown_fact_allows_reject_and_ack(ctx: Ctx, status: str) -> None:
+    """승인 계약의 UNKNOWN 상태(거부·모름 인지)는 새 제약에 걸리지 않는다."""
+    from sqlalchemy import update
+
+    _, _, unknown = _session_with_unknown(ctx, ctx.user_a)
+    with ctx.factory() as s:
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(status=status, confirmed_by=ctx.user_a, confirmed_at=ctx.clock.now())
+        )
+        s.commit()
+    row = _fact_row(ctx, unknown[0])
+    assert (row.source_kind, row.status, row.value_text) == ("UNKNOWN", status, None)

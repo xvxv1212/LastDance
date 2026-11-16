@@ -330,6 +330,14 @@ class ExtractedFactModel(Base):
             " AND offset_end IS NULL AND source_span IS NULL)",
             name="unknown_has_no_source_detail",
         ),
+        # v0.11.2(DB 초안, 팀장 unknown_status 와 같은 조건): 미확인(UNKNOWN) 사실은 미처리·거부·모름 인지
+        # 상태만 가진다. '값 없는 확인 사실'(UNKNOWN+CONFIRMED/MODIFIED)이 직접 DB 쓰기로도 생기지 않게 한다.
+        # 서버는 이미 UNKNOWN 의 CONFIRM 을 거절하고, MODIFY 는 근거를 STATEMENT 로 바꾸므로
+        # 정상 경로와 충돌 없음.
+        CheckConstraint(
+            "source_kind <> 'UNKNOWN' OR status IN ('EXTRACTED', 'REJECTED', 'ACKNOWLEDGED_UNKNOWN')",
+            name="unknown_status",
+        ),
         # 출처 문서는 '같은 점검'에 올린 문서여야 한다(다른 사건 자료 혼입 금지)
         ForeignKeyConstraint(
             ["document_id", "check_session_id"],

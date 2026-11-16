@@ -849,6 +849,11 @@
     "detail": "(source_kind = 'UNKNOWN') = (value_text IS NULL)"
    },
    {
+    "kind": "CHECK",
+    "name": "ck_extracted_facts_unknown_status",
+    "detail": "source_kind <> 'UNKNOWN' OR status IN ('EXTRACTED', 'REJECTED', 'ACKNOWLEDGED_UNKNOWN')"
+   },
+   {
     "kind": "FK(복합)",
     "name": "fk_extracted_facts_document_same_session",
     "detail": "(document_id, check_session_id) → (documents.id, documents.check_session_id) (삭제 시 CASCADE)"
