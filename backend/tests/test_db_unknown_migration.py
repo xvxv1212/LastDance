@@ -1,7 +1,8 @@
 """미확인 사실의 DB 이관·되돌리기 검증(v0.11 → v0.11.1, 실제 임시 PostgreSQL).
 
 기존 URL을 받지 않는 fresh_postgres()로 매번 새 로컬 인스턴스만 만든다.
-변경 전 상태는 현재 schema.sql에서 새 CHECK 하나를 제거하여 합성한다.
+변경 전 상태는 현재 schema.sql에서 해당 버전 이후의 CHECK를 제거하여 합성한다.
+(2026-11-16 김교민 보완: v0.11 = 두 CHECK 모두 없음, v0.11.1 = source_detail만, v0.11.2 = 둘 다)
 원본 v0.11 백업 복원·운영 이관·전체 PostgreSQL/RLS 통합 검증은 이 시험의 범위가 아니다.
 작성자의 외부 경로·su postgres·dropdb 셸 스크립트는 실행하지 않는다.
 """
@@ -26,6 +27,13 @@ from scripts.isolated_postgres import IsolatedPostgres, fresh_postgres
 
 DB_ROOT = Path(__file__).resolve().parents[1] / "db"
 CONSTRAINT = "ck_extracted_facts_unknown_has_no_source_detail"
+LATER_CONSTRAINT = "ck_extracted_facts_unknown_status"  # v0.11.2 에서 추가
+# 버전별로 schema.sql(최신)에서 제거할 CHECK. 이관 단계마다 그 단계의 기대 상태와 비교한다.
+VERSION_DROPS: dict[str, tuple[str, ...]] = {
+    "v0.11": (CONSTRAINT, LATER_CONSTRAINT),
+    "v0.11.1": (LATER_CONSTRAINT,),
+    "v0.11.2": (),
+}
 UPGRADE = DB_ROOT / "migrations" / "v0.11_to_v0.11.1.sql"
 ROLLBACK = DB_ROOT / "migrations" / "v0.11.1_to_v0.11_rollback.sql"
 SEEDED_TABLES = ("users", "check_sessions", "documents", "extracted_facts")
@@ -42,22 +50,24 @@ def migration_pg(record_testsuite_property: Callable[[str, object], None]) -> It
         record_testsuite_property("fresh_pgdata_verified", True)
         record_testsuite_property("listen_address", "127.0.0.1")
         record_testsuite_property("unix_socket_enabled", False)
-        record_testsuite_property("migration_baseline", "schema.sql minus new UNKNOWN CHECK (synthetic)")
+        record_testsuite_property(
+            "migration_baseline", "schema.sql minus later UNKNOWN CHECKs per version (synthetic)"
+        )
         record_testsuite_property("production_db_touched", False)
         record_testsuite_property("external_database_url_used", False)
         yield pg
 
 
 @contextmanager
-def _schema(pg: IsolatedPostgres, *, previous_version: bool = False) -> Iterator[Connection]:
+def _schema(pg: IsolatedPostgres, *, version: str = "v0.11.2") -> Iterator[Connection]:
     name = "unknown_" + uuid.uuid4().hex
     with pg.connect() as owner:
         owner.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(name)))
     with pg.connect(schema=name) as conn:
         conn.execute((DB_ROOT / "schema.sql").read_text(encoding="utf-8"))
-        if previous_version:
+        for constraint in VERSION_DROPS[version]:
             conn.execute(
-                sql.SQL("ALTER TABLE extracted_facts DROP CONSTRAINT {}").format(sql.Identifier(CONSTRAINT))
+                sql.SQL("ALTER TABLE extracted_facts DROP CONSTRAINT {}").format(sql.Identifier(constraint))
             )
         yield conn
 
@@ -152,13 +162,14 @@ def test_invalid_unknown_aborts_upgrade_without_rewriting_rows_or_constraints(
 ) -> None:
     """금지 칸 7종을 각각 넣으면 사전 검사에서 멈추고 합성 기존 행·제약을 보존한다."""
     for index in range(7):
-        with _schema(migration_pg, previous_version=True) as conn:
+        with _schema(migration_pg, version="v0.11") as conn:
             session, document = _seed_parents(conn)
             field, details = _details(document)[index]
             _insert_fact(conn, session, **details)
             _insert_fact(conn, session, known=True, value_normalized=Jsonb({"amount": 0}))
             before_rows, before_constraints = _rows(conn), _constraints(conn)
-            assert CONSTRAINT not in {item["constraint_name"] for item in before_constraints}
+            names = {item["constraint_name"] for item in before_constraints}
+            assert CONSTRAINT not in names and LATER_CONSTRAINT not in names  # 실제 v0.11 상태
 
             with pytest.raises(psycopg.errors.RaiseException, match=r"변환 중단.*1건"):
                 conn.execute(UPGRADE.read_text(encoding="utf-8"))
@@ -172,7 +183,11 @@ def test_clean_upgrade_matches_fresh_schema_rejects_repeat_and_rolls_back_only_c
     migration_pg: IsolatedPostgres,
 ) -> None:
     """정상 이관·중복 적용 거절·되돌리기를 한 생애주기로 검증하고 행 변경이 없음을 확인한다."""
-    with _schema(migration_pg) as fresh, _schema(migration_pg, previous_version=True) as previous:
+    # 첫 단계 적용 결과는 최신(v0.11.2)이 아니라 v0.11.1 새 설치와 비교한다.
+    with (
+        _schema(migration_pg, version="v0.11.1") as fresh,
+        _schema(migration_pg, version="v0.11") as previous,
+    ):
         expected_constraints = _constraints(fresh)
         session, document = _seed_parents(previous)
         _insert_fact(previous, session)
@@ -186,6 +201,8 @@ def test_clean_upgrade_matches_fresh_schema_rejects_repeat_and_rolls_back_only_c
         assert upgraded_constraints == expected_constraints
         assert _rows(previous) == before_rows
         assert len(upgraded_constraints) == len(before_constraints) + 1
+        upgraded_names = {item["constraint_name"] for item in upgraded_constraints}
+        assert CONSTRAINT in upgraded_names and LATER_CONSTRAINT not in upgraded_names
 
         with pytest.raises(psycopg.errors.DuplicateObject):
             previous.execute(UPGRADE.read_text(encoding="utf-8"))
@@ -205,7 +222,7 @@ def test_direct_sql_blocks_seven_unknown_fields_and_preserves_statement_values(
 ) -> None:
     """새 설치·이관 DB 모두 UNKNOWN의 INSERT/UPDATE를 막고 STATEMENT의 실제 값은 허용한다."""
     for migrated in (False, True):
-        with _schema(migration_pg, previous_version=migrated) as conn:
+        with _schema(migration_pg, version="v0.11" if migrated else "v0.11.2") as conn:
             if migrated:
                 conn.execute(UPGRADE.read_text(encoding="utf-8"))
             session, document = _seed_parents(conn)

@@ -212,3 +212,116 @@ def test_direct_sql_blocks_confirmed_unknown_and_keeps_contract_paths(migration_
                 "SELECT source_kind, status FROM extracted_facts WHERE id = %s", (fact,)
             ).fetchone()
             assert saved == {"source_kind": "STATEMENT", "status": "MODIFIED"}
+
+
+# ---------------------------------------------------------------------------
+# 연속 적용·되돌리기 v0.11 → v0.11.1 → v0.11.2 → v0.11.1 → v0.11 (2026-11-16 보완)
+# ---------------------------------------------------------------------------
+UPGRADE_1 = DB_ROOT / "migrations" / "v0.11_to_v0.11.1.sql"
+ROLLBACK_1 = DB_ROOT / "migrations" / "v0.11.1_to_v0.11_rollback.sql"
+STAGE_DROPS = {"v0.11": (CONSTRAINT, PREVIOUS_CONSTRAINT), "v0.11.1": (CONSTRAINT,), "v0.11.2": ()}
+
+
+def _stage_constraints(pg: IsolatedPostgres) -> dict[str, list[dict[str, Any]]]:
+    """버전별 기대 제약 목록 = 그 버전으로 새로 만든 스키마의 제약 목록."""
+    expected = {}
+    for stage, drops in STAGE_DROPS.items():
+        with _schema(pg, drop=drops) as conn:
+            expected[stage] = _constraints(conn)
+    return expected
+
+
+def _run(conn: Connection, path: Path) -> None:
+    conn.execute(path.read_text(encoding="utf-8"))
+    assert conn.info.transaction_status == TransactionStatus.IDLE, path.name
+
+
+def _rejected(conn: Connection, path: Path, error: type[Exception]) -> None:
+    """재적용·순서 오류는 오류로 멈추고, 실패한 트랜잭션만 해제한다(데이터 정리 없음)."""
+    with pytest.raises(error):
+        conn.execute(path.read_text(encoding="utf-8"))
+    conn.rollback()
+
+
+def _seed_contract_rows(conn: Connection) -> None:
+    """승인 계약 안의 합성 행: 미처리·거부·모름 인지 UNKNOWN 3건 + 값이 있는 STATEMENT 1건."""
+    user, session = _seed(conn)
+    for status in ALLOWED:
+        _insert_unknown(conn, session, user, status)
+    conn.execute(
+        "INSERT INTO extracted_facts (id, check_session_id, fact_key, value_text, value_normalized, "
+        "source_kind, status, confirmed_by, confirmed_at) VALUES "
+        "(%s, %s, 'PAYMENT_AMOUNT', '600,000원(합성)', '{\"amount\": 600000}', "
+        "'STATEMENT', 'CONFIRMED', %s, now())",
+        (uuid.uuid4(), session, user),
+    )
+
+
+def test_full_chain_up_and_down_matches_each_stage_and_preserves_rows(migration_pg: IsolatedPostgres) -> None:
+    """각 단계 결과가 그 버전의 새 설치와 같고, 단계마다 재적용은 거절되며, 행은 끝까지 그대로다."""
+    expected = _stage_constraints(migration_pg)
+    names = {stage: {item["constraint_name"] for item in items} for stage, items in expected.items()}
+    assert PREVIOUS_CONSTRAINT not in names["v0.11"] and CONSTRAINT not in names["v0.11"]
+    assert PREVIOUS_CONSTRAINT in names["v0.11.1"] and CONSTRAINT not in names["v0.11.1"]
+    assert {PREVIOUS_CONSTRAINT, CONSTRAINT} <= names["v0.11.2"]
+
+    with _schema(migration_pg, drop=STAGE_DROPS["v0.11"]) as conn:
+        _seed_contract_rows(conn)
+        rows = _rows(conn)
+        assert _constraints(conn) == expected["v0.11"]
+
+        _rejected(conn, UPGRADE, psycopg.errors.RaiseException)  # v0.11 에서 v0.11.2 먼저 → 순서 오류
+        assert _constraints(conn) == expected["v0.11"]
+
+        _run(conn, UPGRADE_1)
+        assert _constraints(conn) == expected["v0.11.1"]
+        _rejected(conn, UPGRADE_1, psycopg.errors.DuplicateObject)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11.1"], rows)
+
+        _run(conn, UPGRADE)
+        assert _constraints(conn) == expected["v0.11.2"]
+        _rejected(conn, UPGRADE, psycopg.errors.DuplicateObject)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11.2"], rows)
+
+        _run(conn, ROLLBACK)
+        assert _constraints(conn) == expected["v0.11.1"]
+        _rejected(conn, ROLLBACK, psycopg.errors.UndefinedObject)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11.1"], rows)
+
+        _run(conn, ROLLBACK_1)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11"], rows)
+
+        # 같은 DB를 다시 올려도 같은 결과(되돌리기 후 재적용 가능)
+        _run(conn, UPGRADE_1)
+        _run(conn, UPGRADE)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11.2"], rows)
+
+
+def test_chain_stops_at_second_step_when_status_violation_found(migration_pg: IsolatedPostgres) -> None:
+    """v0.11 에 '모름 + 확인됨' 행이 있으면: 1단계는 통과(그 규칙과 무관), 2단계에서 멈춤, 행 그대로.
+
+    멈춘 뒤에도 v0.11.1 상태가 유지되고 1단계 되돌리기로 v0.11 로 돌아갈 수 있다. 위반 행은 정리하지 않는다.
+    """
+    expected = _stage_constraints(migration_pg)
+    with _schema(migration_pg, drop=STAGE_DROPS["v0.11"]) as conn:
+        _seed_contract_rows(conn)
+        user = conn.execute("SELECT id FROM users").fetchone()
+        session = conn.execute("SELECT id FROM check_sessions").fetchone()
+        assert user is not None and session is not None
+        violating = _insert_unknown(conn, session["id"], user["id"], "CONFIRMED")
+        rows = _rows(conn)
+
+        _run(conn, UPGRADE_1)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11.1"], rows)
+
+        with pytest.raises(psycopg.errors.RaiseException, match=r"변환 중단.*1건"):
+            conn.execute(UPGRADE.read_text(encoding="utf-8"))
+        conn.rollback()
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11.1"], rows)
+        still = conn.execute(
+            "SELECT source_kind, status FROM extracted_facts WHERE id = %s", (violating,)
+        ).fetchone()
+        assert still == {"source_kind": "UNKNOWN", "status": "CONFIRMED"}  # 자동 변경 없음
+
+        _run(conn, ROLLBACK_1)
+        assert (_constraints(conn), _rows(conn)) == (expected["v0.11"], rows)
