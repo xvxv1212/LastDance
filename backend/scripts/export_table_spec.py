@@ -82,7 +82,8 @@ def main() -> None:
                 "ko": t.info["ko"],
                 "comment": t.comment,
                 "columns": cols,
-                "constraints": constraints,
+                # 제약 순서를 이름순으로 고정(t.constraints 는 집합이라 실행마다 순서가 달랐음)
+                "constraints": sorted(constraints, key=lambda c: (c["kind"], c["name"])),
                 "indexes": indexes,
             }
         )

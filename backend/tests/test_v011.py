@@ -664,3 +664,91 @@ def test_sup02_summary_legal_reference_needs_verified_caution(ctx: Ctx) -> None:
     # 법령을 언급하지 않는 일반 요약('방법에 따라' 같은 말 포함)은 근거 항목 없이도 저장
     plain = "확인된 사실을 정리했습니다. 다음 방법에 따라 자료를 준비하세요."
     assert _report(ctx, ctx.user_a, str(sid), [fact], summary_text=plain).status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# v0.11.1(DB): 미확인 사실의 정규화 값·출처 세부 금지 — DB 제약만 시험(서비스 422 는 이형민 인수 범위)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("value_normalized", {"amount": 0}),
+        ("ai_value_text", "0원"),
+        ("page_no", 1),
+        ("source_span", "모름"),
+    ],
+)
+def test_db_check_unknown_fact_has_no_source_detail(ctx: Ctx, column: str, value: object) -> None:
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    _, _, unknown = _session_with_unknown(ctx, ctx.user_a)
+    with ctx.factory() as s, pytest.raises(IntegrityError):
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(**{column: value})
+        )
+        s.commit()
+    with ctx.factory() as s, pytest.raises(IntegrityError):  # 위치는 시작·끝 짝으로
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(offset_start=0, offset_end=2)
+        )
+        s.commit()
+
+
+def test_db_check_allows_unknown_fact_after_user_supplies_value(ctx: Ctx) -> None:
+    """값을 알게 되어 MODIFY 하면 근거가 STATEMENT 로 바뀌므로 정규화 값을 저장할 수 있다."""
+    from sqlalchemy import update
+
+    _, known, unknown = _session_with_unknown(ctx, ctx.user_a)
+    _confirm(ctx, ctx.user_a, known[0], action="CONFIRM")
+    assert _confirm(ctx, ctx.user_a, unknown[0], action="MODIFY", new_value="2026-05-10").status_code == 200
+    with ctx.factory() as s:
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(value_normalized={"date": "2026-05-10"})
+        )
+        s.commit()
+    assert _fact_row(ctx, unknown[0]).value_normalized == {"date": "2026-05-10"}
+
+
+# ---------------------------------------------------------------------------
+# v0.11.2(DB 초안): 미확인 사실의 상태 제한(팀장 unknown_status 와 같은 조건) — DB 제약만 시험
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("status", ["CONFIRMED", "MODIFIED"])
+def test_db_check_unknown_fact_cannot_be_confirmed_without_value(ctx: Ctx, status: str) -> None:
+    """앱을 거치지 않고 DB 에 직접 써도 '값 없는 확인 사실'(UNKNOWN+CONFIRMED/MODIFIED)은 저장 불가."""
+    from sqlalchemy import update
+    from sqlalchemy.exc import IntegrityError
+
+    _, _, unknown = _session_with_unknown(ctx, ctx.user_a)
+    with ctx.factory() as s, pytest.raises(IntegrityError):
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(status=status, confirmed_by=ctx.user_a, confirmed_at=ctx.clock.now())
+        )
+        s.commit()
+    row = _fact_row(ctx, unknown[0])
+    assert (row.source_kind, row.status, row.value_text) == ("UNKNOWN", "EXTRACTED", None)
+
+
+@pytest.mark.parametrize("status", ["REJECTED", "ACKNOWLEDGED_UNKNOWN"])
+def test_db_check_unknown_fact_allows_reject_and_ack(ctx: Ctx, status: str) -> None:
+    """승인 계약의 UNKNOWN 상태(거부·모름 인지)는 새 제약에 걸리지 않는다."""
+    from sqlalchemy import update
+
+    _, _, unknown = _session_with_unknown(ctx, ctx.user_a)
+    with ctx.factory() as s:
+        s.execute(
+            update(orm.ExtractedFactModel)
+            .where(orm.ExtractedFactModel.id == uuid.UUID(unknown[0]))
+            .values(status=status, confirmed_by=ctx.user_a, confirmed_at=ctx.clock.now())
+        )
+        s.commit()
+    row = _fact_row(ctx, unknown[0])
+    assert (row.source_kind, row.status, row.value_text) == ("UNKNOWN", status, None)
