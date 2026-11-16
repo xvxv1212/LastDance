@@ -33,3 +33,53 @@ jobs:
         run: ruff check .
       - name: Tests
         run: python -m pytest -q
+
+  db-migrations:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/requirements-checkpoint-test.txt
+      - name: Install isolated PostgreSQL test requirements
+        run: python -m pip install -r requirements-checkpoint-test.txt
+      - name: Run DB migration tests
+        run: |
+          python -m pytest -v -ra --junitxml=db-migrations.xml             tests/test_db_unknown_migration.py             tests/test_db_unknown_status_migration.py
+      - name: Require 10 passes and zero skips or failures
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          path = Path("db-migrations.xml")
+          if not path.is_file():
+              raise SystemExit("FAIL: JUnit result missing")
+          root = ET.parse(path).getroot()
+          suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+          if not suites:
+              raise SystemExit("FAIL: no testsuite")
+          cases = [c for s in suites for c in s.findall("testcase")]
+          expected = {
+              "tests.test_db_unknown_migration": 3,
+              "tests.test_db_unknown_status_migration": 7,
+          }
+          counts = {key: 0 for key in expected}
+          for case in cases:
+              cls = case.get("classname", "")
+              if cls not in expected:
+                  raise SystemExit(f"FAIL: unexpected test class {cls}")
+              counts[cls] += 1
+          failed = sum(bool(c.find("failure") is not None or c.find("error") is not None) for c in cases)
+          skipped = sum(c.find("skipped") is not None for c in cases)
+          if counts != expected or len(cases) != 10 or failed or skipped:
+              raise SystemExit(f"FAIL: counts={counts}, total={len(cases)}, failed={failed}, skipped={skipped}")
+          print("PASS: 10 DB migration tests, 0 failed, 0 skipped")
+          PY
