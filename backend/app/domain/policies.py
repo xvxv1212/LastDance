@@ -80,8 +80,29 @@ class PersonalInfoMasker:
 
     def mask(self, text: str) -> str:
         for pattern, label in self._PATTERNS:
-            text = pattern.sub(label, text)
+            if label == "[계좌번호]":
+                text = pattern.sub(lambda match, original=text: self._account_or_date(match, original), text)
+            else:
+                text = pattern.sub(label, text)
         return text
+
+    @staticmethod
+    def _account_or_date(match: re.Match[str], text: str) -> str:
+        """명시된 날짜 문맥의 유효한 ISO 날짜만 보존. 모호한 번호는 계속 가린다."""
+        value = match.group()
+        prefix = text[max(0, match.start() - 24):match.start()]
+        if re.search(r"(?:계좌|입금|송금)[^\n.,]*$", prefix):
+            return "[계좌번호]"
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value) and re.search(
+            r"(?:계약일|해지일|해지요청일|시행일|결제일|이용개시일|날짜)\s*[:：=]?\s*$", prefix
+        ):
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                pass
+            else:
+                return value
+        return "[계좌번호]"
 
     @classmethod
     def count_masks(cls, text: str) -> int:
