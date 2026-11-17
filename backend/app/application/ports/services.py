@@ -91,6 +91,13 @@ class KnowledgeBase(ABC):
         """인용 검증용 청크 정보(본문·출처 활성 여부·시행일·출처 메타데이터). 없는 ID 는 결과에 없다."""
 
 
+class ApprovedEvidenceReader(KnowledgeBase):
+    """별도 승인 증거로 검증한 근거와 ID별 거절 사유를 함께 반환한다."""
+
+    @abstractmethod
+    def evaluate(self, chunk_ids: list[str]) -> tuple[dict[str, ChunkFacts], dict[str, list[str]]]: ...
+
+
 class PasswordHasher(ABC):
     """비밀번호 단방향 해시(v0.9). 구현은 Argon2id(안전성 확보조치 기준 제7조: 일방향 암호화)."""
 

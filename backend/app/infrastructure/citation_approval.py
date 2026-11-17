@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from app.application.ports.services import KnowledgeBase
+from app.application.ports.services import ApprovedEvidenceReader, KnowledgeBase
 from app.domain.policies import ChunkFacts
 
 
@@ -22,7 +22,7 @@ def content_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-class ApprovedKnowledgeBase(KnowledgeBase):
+class ApprovedKnowledgeBase(ApprovedEvidenceReader):
     """본문 저장소의 조회 결과를 신뢰한 승인 증거와 대조한다. DB 스키마 변경 없음."""
 
     def __init__(self, delegate: KnowledgeBase, manifest: dict[str, Any], evidence_root: Path) -> None:
