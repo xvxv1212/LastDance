@@ -6,8 +6,10 @@
 
 ## 기준 파일과 이번 변경
 
-- DB 기준 커밋: `fe454f2c18d35b1798bfd92b1d8997fb6c4a57b6`.
-- 준비 브랜치: `work/db-prepare-20261112`. 변경 브랜치 → 커밋·푸시 → PR → 검토·병합 경로를 유지한다.
+- 최초 작성 기준(2026-11-12, 이형민): DB 기준 커밋 `fe454f2c18d35b1798bfd92b1d8997fb6c4a57b6`, 준비 브랜치 `work/db-prepare-20261112`의 `196ffb6e390a69deae00444c8e60313ababcace8`.
+- 현재 기준(2026-11-17, 김교민 보정): main `415cb57d5374949c8313489141967568707093c0`, 후속 브랜치 `work/db-readiness-20261117`. 변경 브랜치 → 커밋·푸시 → PR → 검토·병합 경로를 유지한다.
+- 최초 작성 이후 main에 반영된 것: PR #6의 v0.11.1 `ck_extracted_facts_unknown_has_no_source_detail`·v0.11.2 `ck_extracted_facts_unknown_status` 제약과 이관·되돌리기 파일, PR #7의 DB 이관 전용 CI(`db-migrations`). 현재 `schema.sql`은 **v0.11.2** 구조다.
+- 조회 SQL 두 개는 원본과 바이트가 같다(변경 없음). 이번 보정은 이 안내서의 기준·버전·경로와 2.1절 추가뿐이다.
 - `schema.sql`, `rls_policies.sql`, `knowledge_schema.sql`, `roles.sql`, `checkpoint_roles.sql`, `table_spec.json`은 기존 파일을 그대로 사용한다.
 - 이 폴더의 `00_preflight.sql`과 `90_inspect_installed.sql`은 **조회만 하는 파일**이다. 비밀번호와 업무 행을 읽거나 구조·데이터·권한을 변경하지 않는다.
 - 이전 `work/cloud-staging-20261112`의 업체별 배포안은 보류된 참고 자료다. 이 브랜치에 서버 설정을 합치지 않는다.
@@ -57,7 +59,27 @@ psql 'service=gwonri_db_owner' -X --set=ON_ERROR_STOP=1 \
 
 설치 1~4는 오류 시 중단하고 한 트랜잭션으로 취소되게 묶었다. 사전 조회는 자동 승인기가 아니므로 조회 출력을 검토한 뒤 설치 명령을 실행한다. `schema.sql`은 새 DB 전용이며 반복 적용 파일이 아니다. ORM 모델에서 생성되는 원본을 손으로 수정하지 않는다.
 
-이미 v0.11.1 구조가 생성된 새 DB에 `v0.11_to_v0.11.1.sql`을 이어서 실행하지 않는다. 기존 DB의 이관은 현재 버전·위반 행·백업을 따로 확인한 뒤 필요한 이관 파일만 적용한다. `IF NOT EXISTS`는 기존 표의 구조가 같은지 검증해 주지 않는다. 기존 데이터를 자동 정리하거나 `DROP SCHEMA ... CASCADE`로 초기화하지 않는다.
+현재 `schema.sql`로 만든 새 DB는 이미 v0.11.2 구조다. 여기에 `db/migrations/v0.11_to_v0.11.1.sql`이나 `db/migrations/v0.11.1_to_v0.11.2.sql`을 이어서 실행하지 않는다(실행하면 제약 중복 오류로 중단된다). 기존 DB의 이관은 2.1절에 따라 현재 버전·위반 행·백업을 따로 확인한 뒤 필요한 이관 파일만 적용한다. `IF NOT EXISTS`는 기존 표의 구조가 같은지 검증해 주지 않는다. 기존 데이터를 자동 정리하거나 `DROP SCHEMA ... CASCADE`로 초기화하지 않는다.
+
+### 2.1 기존 DB 이관과 되돌리기
+
+새 빈 DB 설치와 다른 절차다. 이미 데이터가 있는 DB에는 `schema.sql`을 다시 실행하지 않고, 현재 버전에 맞는 단계만 적용한다.
+
+현재 버전은 `90_inspect_installed.sql`의 `extracted_facts` CHECK 목록으로 구분한다.
+
+| 목록에 보이는 모름(UNKNOWN) 제약 | 현재 버전 | 다음에 적용할 이관 |
+| --- | --- | --- |
+| 둘 다 없음 | v0.11 | `db/migrations/v0.11_to_v0.11.1.sql` → `db/migrations/v0.11.1_to_v0.11.2.sql` |
+| `ck_extracted_facts_unknown_has_no_source_detail`만 있음 | v0.11.1 | `db/migrations/v0.11.1_to_v0.11.2.sql` |
+| 위 제약과 `ck_extracted_facts_unknown_status` 둘 다 있음 | v0.11.2 | 없음(최신) |
+
+위 표는 v0.11 이후만 다룬다. `purge_tasks` 표나 `ACKNOWLEDGED_UNKNOWN` 상태가 없는 더 이전 DB는 `db/migrations/`의 앞 단계부터 따로 검토한다.
+
+- 적용 전 백업을 받고 별도 새 DB에 복원되는지 확인한다. 이관 파일은 각각 한 트랜잭션이며 `psql -X --set=ON_ERROR_STOP=1 --file=...`로 한 개씩 실행한다.
+- 위반 행이 있으면 이관 파일이 스스로 중단한다. 상태를 바꾸거나 행을 지워서 통과시키지 않는다. 각 파일 하단의 조회문으로 대상 행을 확인하고 처리 방법은 담당자와 정한다.
+- 순서를 건너뛰거나(v0.11에서 v0.11.2 먼저) 같은 파일을 다시 실행하면 오류로 중단되며 구조는 바뀌지 않는다.
+- 구조 되돌리기는 역순이다: `db/migrations/v0.11.2_to_v0.11.1_rollback.sql` → `db/migrations/v0.11.1_to_v0.11_rollback.sql`. 제약만 제거하고 데이터는 바꾸지 않는다. 제약을 제거하면 그 뒤로 DB가 해당 잘못된 저장을 막지 못하므로 일반 초기화 명령으로 쓰지 않는다.
+- 구조 되돌리기와 백업 복원은 서로 다른 절차다. 데이터가 손상됐다면 되돌리기 SQL이 아니라 백업을 별도 새 DB에 복원해 대조한다(5절).
 
 ## 3 계정 권한 계약
 
@@ -98,9 +120,11 @@ psql 'service=gwonri_db_owner' -X --set=ON_ERROR_STOP=1 \
 
 `pg_dump`는 한 DB를 백업하며 클러스터 공통 역할·비밀번호를 포함하지 않는다. 다른 서버 복구에는 검토된 역할 정의·권한·별도 비밀 전달·확장 설치가 필요하다. `template0` 기반 새 시험 DB에 `pg_restore --exit-on-error --dbname=새DB ...`로 복원하며, 별도 이름의 DB에 복원할 때 `--create`를 섞지 않는다. `--no-owner`·`--no-acl`로 생략한 항목은 복원 완료로 표시하지 않는다.
 
-현재 남은 `unknown_status` 상태 제한 차이는 김교민의 기존 후속 검토로 유지한다. `unknown_has_no_source_detail` 직접 방어 검증이 이 상태 제한 차이까지 해결했다는 뜻은 아니다. 제약을 추가해야 하면 기존 행 영향과 최소 이관·되돌리기안을 별도로 검토한다.
+`unknown_status` 상태 제한 차이는 v0.11.2(`ck_extracted_facts_unknown_status`)로 main에 반영됐다(PR #6, 2026-11-16 병합). `unknown_has_no_source_detail`과 함께 두 제약의 이관·되돌리기는 `tests/test_db_unknown_migration.py`·`tests/test_db_unknown_status_migration.py` 10개로 검증하며 GitHub `db-migrations` 작업이 10 통과·0 실패·0 건너뜀일 때만 통과한다(PR #7). 코드 병합과 CI 통과는 실제 공용·운영 DB 적용 완료가 아니다.
 
-## 6 이번 새 로컬 검증 근거
+## 6 로컬 검증 근거
+
+### 6.1 최초 검증(2026-11-12, 기준 fe454f2, v0.11.1 구조)
 
 2026-11-12 생성한 별도 임시 PostgreSQL **16.2**와 pgvector **0.6.2**에서 원본 SQL을 그대로 설치했다. 이 버전은 시험 환경 기록이며 새 공용 DB의 배포 버전을 고정하지 않는다.
 
@@ -114,6 +138,23 @@ psql 'service=gwonri_db_owner' -X --set=ON_ERROR_STOP=1 \
 조회 파일 두 개를 미설치·설치 후에 각각 읽기 전용 트랜잭션으로 실행한 4회와 실제 psql 설치 1회도 별도 절차 점검으로 통과했다. 13개 표·9개 RLS 표·4개 역할, 역할×표 52행의 권한 값 260개를 대조했다. 이 5회는 위 pytest 사례 수에 더하지 않는다. 설치 시험은 비밀번호 없는 새 loopback 임시 연결을 사용했으며 README의 연결 서비스 파일 자체는 아직 구성·검증하지 않았다. SQL 순서·단일 트랜잭션·search_path는 동일하게 실행했다. 정상 설치 경로 시험이며 설치 실패 시의 롤백 시험까지 포함하지 않는다. 증거는 `verification/preparation_checks/`에 있다.
 
 공용 DB 생성·원격 접속·다른 서버로의 전체 재해 복구·실제 모델·Graph·API·화면·전체 회귀 시험은 이번 실행에 포함되지 않는다. 새 조회 SQL의 실행 점검은 별도 기록하고 위 15개에 합산하지 않는다.
+
+### 6.2 현재 main 재점검(2026-11-17, 기준 415cb57, v0.11.2 구조)
+
+김교민이 새 임시 PostgreSQL 16.2·pgvector 0.6.2에서 절차 점검 8개를 다시 실행해 모두 통과했다. pytest 사례 수가 아니며 6.1의 15개나 이관 시험 10개와 합산하지 않는다.
+
+| 점검 | 결과 |
+| --- | --- |
+| 조회 SQL 두 개의 문장이 모두 SELECT/WITH(각 10문장) | PASS |
+| 설치 전 빈 DB에서 읽기 전용 트랜잭션으로 두 파일 실행 | PASS |
+| 읽기 전용 트랜잭션이 실제로 변경(CREATE)을 거부 | PASS |
+| 2절 순서의 psql 단일 트랜잭션 설치 | PASS |
+| 설치 후 조회: 13개 표·9개 RLS 표·역할 4개·정책 9개·권한 값 260개·모름 제약 2개 검증됨 | PASS |
+| 최신 구조에 과거 이관 두 파일 재실행 → 오류로 중단, 구조 불변 | PASS |
+| v0.11 재현 → v0.11.1 → v0.11.2 → v0.11.1 → v0.11 각 단계를 조회 결과로 구분, 이관 결과 = 새 설치 | PASS |
+| 설치 중 오류 발생 시 표·역할·스키마가 전부 취소됨(6.1에서 미실행으로 남긴 항목) | PASS |
+
+실제 공용·운영 DB 접속, 연결 서비스 파일 구성, 역할별 실제 접속과 RLS 행 차단, 체크포인트 준비, 백업·복원은 이번 재점검에 포함되지 않는다(NOT RUN). 6.1의 백업·복원·RLS 대표 3개 표 결과는 v0.11.1 구조 기준의 과거 실행이다.
 
 ## 공식 참고
 
