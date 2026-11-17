@@ -39,3 +39,22 @@ export const HOLD_LABEL: Record<string, string> = {
   NO_CITATION: "인용 근거 없음 · 팀 인용 승인 전",
   CITATION_FAILED: "인용 검증 실패",
 };
+
+// S07 B안 질문 문장. 값은 서버 facts에서만 가져오고, 여기서는 묻는 말만 정한다.
+const QUESTION: Record<string, string> = {
+  BUSINESS_NAME: "계약한 사업자 이름이 맞나요?",
+  CONTRACT_PERIOD: "계약 기간이 맞나요?",
+  PAYMENT_AMOUNT: "결제한 금액이 맞나요?",
+  PAYMENT_METHOD: "결제 수단이 맞나요?",
+  TOTAL_SESSIONS: "계약한 총 이용횟수가 맞나요?",
+  USED_SESSIONS: "실제로 이용한 횟수가 맞나요?",
+  CONTRACT_DATE: "계약한 날짜를 알고 있나요?",
+  CANCEL_REQUEST_DATE: "해지를 요청한 날짜를 알고 있나요?",
+  BUSINESS_RESPONSE: "사업자 답변 내용이 맞나요?",
+  REFUND_CLAUSE: "환불 조항 내용이 맞나요?",
+  OTHER: "계약서 사본을 갖고 있나요?",
+};
+
+export function factQuestion(key: string, label: string, unknownSource: boolean): string {
+  return QUESTION[key] ?? (unknownSource ? `${label}을(를) 알고 있나요?` : `${label} 내용이 맞나요?`);
+}
