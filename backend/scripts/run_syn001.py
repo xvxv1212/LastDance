@@ -26,13 +26,16 @@ from typing import Any
 
 import httpx
 import uvicorn
+from fastapi import Depends, HTTPException
 
 from app.application.use_cases.account import SignUpCommand
 from app.container import Container
-from app.domain.enums import FactStatus, SessionStatus
+from app.domain.entities import User, new_id
+from app.domain.enums import FactStatus, SessionStatus, UserRole, UserStatus
 from app.domain.errors import NotFoundError
 from app.infrastructure.db.base import Base
 from app.infrastructure.db.engine import build_session_factory
+from app.infrastructure.db.unit_of_work import SqlAlchemyUnitOfWork
 from app.infrastructure.knowledge import JsonAgencyDirectory, LocalKnowledgeBase
 from app.infrastructure.services import (
     Argon2PasswordHasher,
@@ -41,7 +44,7 @@ from app.infrastructure.services import (
     ServiceTokenVerifier,
     SystemClock,
 )
-from app.interface.api.dependencies import SCOPE_FACTS_WRITE, SCOPE_REPORTS_WRITE
+from app.interface.api.dependencies import SCOPE_FACTS_WRITE, SCOPE_REPORTS_WRITE, current_user_id
 from app.main import create_app
 
 API = "/api/v1"
@@ -99,7 +102,7 @@ class SessionContext:
 
 
 class LocalRun:
-    def __init__(self, db_root: Path, output: Path, port: int) -> None:
+    def __init__(self, db_root: Path, output: Path, port: int, *, team_login: bool = False) -> None:
         self.output = output
         self.output.mkdir(parents=True, exist_ok=True)
         self.trace = (output / "redacted_trace.jsonl").open("w", encoding="utf-8")
@@ -108,22 +111,42 @@ class LocalRun:
         self.checks: list[dict[str, Any]] = []
         self.engine, self.factory = build_session_factory(f"sqlite:///{db_root / 'synthetic.sqlite3'}")
         Base.metadata.create_all(self.engine)
+        hasher = Argon2PasswordHasher(time_cost=1, memory_cost=8 * 1024)
         self.container = Container(
             self.factory,
             SystemClock(),
             LocalFileStorage(db_root / "files"),
             JwtTokenVerifier(secrets.token_urlsafe(48)),
             service_verifier=ServiceTokenVerifier(secrets.token_urlsafe(48)),
-            password_hasher=Argon2PasswordHasher(time_cost=1, memory_cost=8 * 1024),
+            password_hasher=hasher,
             knowledge=LocalKnowledgeBase([], []),
             agencies=JsonAgencyDirectory([]),
             public_signup_enabled=False,
         )
         self.accounts = []
-        for index in (1, 2):
+        for index in range(1, 6 if team_login else 3):
             email = f"synthetic-{index}@example.invalid"
-            password = "Syn!Aa9-" + secrets.token_urlsafe(20)
-            user_id = self.container.sign_up().execute(SignUpCommand(email, password, "합성 시험계정"))
+            if team_login:
+                password = f"{secrets.randbelow(1_000_000):06d}"
+                now = self.container.clock.now()
+                user_id = new_id()
+                with SqlAlchemyUnitOfWork(self.factory) as uow:
+                    uow.users.add(
+                        User(
+                            id=user_id,
+                            email=email,
+                            password_hash=hasher.hash(password),
+                            display_name=f"team{index}",
+                            role=UserRole.CITIZEN,
+                            status=UserStatus.ACTIVE,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    uow.commit()
+            else:
+                password = "Syn!Aa9-" + secrets.token_urlsafe(20)
+                user_id = self.container.sign_up().execute(SignUpCommand(email, password, "합성 시험계정"))
             self.accounts.append({"email": email, "password": password, "user_id": user_id})
         self.user_id = self.accounts[0]["user_id"]
         self.other_user_id = self.accounts[1]["user_id"]
@@ -132,9 +155,20 @@ class LocalRun:
         self.sock.bind(("127.0.0.1", port))
         self.sock.listen(128)
         self.base_url = f"http://127.0.0.1:{self.sock.getsockname()[1]}"
+        self.team_connections: dict[uuid.UUID, dict[str, Any]] = {}
+        app = create_app(self.container, cors_origins=ORIGINS)
+        if team_login:
+
+            @app.get(f"{API}/demo/me")
+            def my_demo(user_id: uuid.UUID = Depends(current_user_id)) -> dict[str, Any]:
+                connection = self.team_connections.get(user_id)
+                if connection is None:
+                    raise HTTPException(status_code=404)
+                return connection
+
         self.server = uvicorn.Server(
             uvicorn.Config(
-                create_app(self.container, cors_origins=ORIGINS),
+                app,
                 host="127.0.0.1",
                 port=self.sock.getsockname()[1],
                 log_level="error",
@@ -161,13 +195,17 @@ class LocalRun:
             require(claims.user_id == account["user_id"], "로그인 사용자 문맥 불일치")
             self.user_headers.append({"Authorization": f"Bearer {login['access_token']}"})
         self.headers = self.user_headers[0]
+        for headers in self.user_headers if team_login else [self.headers]:
+            self.record_consents(headers)
+
+    def record_consents(self, headers: dict[str, str]) -> None:
         for consent in ("PRIVACY_REQUIRED", "SENSITIVE_DOCUMENT"):
             self.request(
                 "합성 이용 동의",
                 "POST",
                 f"{API}/consents",
                 201,
-                headers=self.headers,
+                headers=headers,
                 body={"consent_type": consent, "policy_version": "synthetic-20261112", "agreed": True},
             )
 
@@ -180,9 +218,11 @@ class LocalRun:
         self.engine.dispose()
         self.trace.close()
 
-    def service_headers(self, scope: str) -> dict[str, str]:
+    def service_headers(self, scope: str, user_id: uuid.UUID | None = None) -> dict[str, str]:
         # 기존 쓰기 권한 하나만 발급한다. 읽기 권한은 만들거나 확장하지 않는다.
-        token = self.container.service_verifier.issue("synthetic-in-process", self.user_id, [scope])
+        token = self.container.service_verifier.issue(
+            "synthetic-in-process", user_id or self.user_id, [scope]
+        )
         return {"Authorization": f"Bearer {token}"}
 
     def request(
@@ -225,14 +265,14 @@ class LocalRun:
         return payload
 
     def seed(
-        self, label: str = "SYN-001", *, all_unknown: bool = False
+        self, label: str = "SYN-001", *, all_unknown: bool = False, account_index: int = 0
     ) -> tuple[SessionContext, dict[str, str]]:
         session = self.request(
             f"{label} 상황 입력",
             "POST",
             f"{API}/check-sessions",
             201,
-            headers=self.headers,
+            headers=self.user_headers[account_index],
             body={
                 "entry_type": "REFUND_CONCERN",
                 "situation_text": (
@@ -243,7 +283,7 @@ class LocalRun:
                 ),
             },
         )
-        context = SessionContext(self.user_id, uuid.UUID(session["id"]))
+        context = SessionContext(self.accounts[account_index]["user_id"], uuid.UUID(session["id"]))
         # 로그인으로 확인한 사용자와 그 사용자가 HTTP로 생성한 점검만 내부 작업 문맥에 등록.
         self._contexts.add(context)
         facts = (
@@ -268,7 +308,7 @@ class LocalRun:
             "POST",
             f"{API}/check-sessions/{context.session_id}/facts",
             201,
-            headers=self.service_headers(SCOPE_FACTS_WRITE),
+            headers=self.service_headers(SCOPE_FACTS_WRITE, context.user_id),
             body={"facts": facts},
         )
         return context, {fact["fact_key"]: fid for fact, fid in zip(facts, result["ids"], strict=True)}
@@ -340,7 +380,7 @@ class LocalRun:
             "POST",
             f"{API}/check-sessions/{context.session_id}/reports",
             (201, 409) if retry_stale else 201,
-            headers=self.service_headers(SCOPE_REPORTS_WRITE),
+            headers=self.service_headers(SCOPE_REPORTS_WRITE, context.user_id),
             body=self.report_body(context),
         )
         if retry_stale and result.get("code") == "CONFLICT":
@@ -607,11 +647,22 @@ class LocalRun:
 
     def serve(self, credentials_path: Path) -> None:
         context, ids = self.seed()
+        sessions = [context]
+        for index in range(len(self.accounts)):
+            other = context if index == 0 else self.seed(account_index=index)[0]
+            if index:
+                sessions.append(other)
+            self.team_connections[other.user_id] = {
+                "session_id": str(other.session_id),
+                "scenario": self.connection(other, {})["scenario"],
+                "contract_copy_possession": "UNKNOWN",
+            }
         payload = {
             "base_url": self.base_url,
             "login_path": f"{API}/auth/login",
             "accounts": [
-                {"email": account["email"], "password": account["password"]} for account in self.accounts
+                {"login_id": f"team{index}", "email": account["email"], "password": account["password"]}
+                for index, account in enumerate(self.accounts, start=1)
             ],
         }
         fd = os.open(credentials_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -645,33 +696,44 @@ class LocalRun:
             ),
             flush=True,
         )
-        last_basis = None
         while self.thread.is_alive():
-            detail = self.read_for_ai(context)
-            basis = detail.session.facts_confirmed_at
-            if detail.session.status == SessionStatus.FACTS_CONFIRMED and basis != last_basis:
-                try:
-                    rid = self.submit(context, retry_stale=True)
-                except StaleDraftError:
-                    # 읽기와 제출 사이의 사실 수정은 정상적인 409 경계다.
-                    # 같은 사용자·점검을 다음 회차에 다시 읽고 새 초안을 제출한다.
-                    time.sleep(0.1)
-                    continue
-                last_basis = basis
-                connection.update(report_id=rid, facts_confirmed_at=basis.isoformat())
-                write_json(self.output / "connection.json", connection)
-                bound = self.container.for_user(context.user_id)
-                bound.ensure_active_user().execute(context.user_id)
-                stored_report = bound.get_report_detail().execute(context.user_id, uuid.UUID(rid))
-                write_json(
-                    self.output / "report.json",
-                    {
-                        "observation": "동일 프로세스 문맥에서 읽은 보고서. 시민 HTTP 토큰 대여 없음.",
-                        "report": dataclasses.asdict(stored_report.report),
-                        "is_stale": stored_report.is_stale,
-                    },
-                )
+            for active in sessions:
+                self.refresh_report(active, connection if active == context else None)
             time.sleep(1)
+
+    def refresh_report(self, context: SessionContext, local_connection: dict[str, Any] | None) -> None:
+        public = self.team_connections[context.user_id]
+        detail = self.read_for_ai(context)
+        basis = detail.session.facts_confirmed_at
+        if (
+            detail.session.status == SessionStatus.FACTS_CONFIRMED
+            and basis is not None
+            and basis.isoformat() != public.get("facts_confirmed_at")
+        ):
+            try:
+                rid = self.submit(context, retry_stale=True)
+            except StaleDraftError:
+                # 읽기와 제출 사이의 사실 수정은 정상적인 409 경계다.
+                # 같은 사용자·점검을 다음 회차에 다시 읽고 새 초안을 제출한다.
+                time.sleep(0.1)
+                return
+            public = dict(public, report_id=rid, facts_confirmed_at=basis.isoformat())
+            self.team_connections[context.user_id] = public
+            if local_connection is None:
+                return
+            local_connection.update(report_id=rid, facts_confirmed_at=basis.isoformat())
+            write_json(self.output / "connection.json", local_connection)
+            bound = self.container.for_user(context.user_id)
+            bound.ensure_active_user().execute(context.user_id)
+            stored_report = bound.get_report_detail().execute(context.user_id, uuid.UUID(rid))
+            write_json(
+                self.output / "report.json",
+                {
+                    "observation": "동일 프로세스 문맥에서 읽은 보고서. 시민 HTTP 토큰 대여 없음.",
+                    "report": dataclasses.asdict(stored_report.report),
+                    "is_stale": stored_report.is_stale,
+                },
+            )
 
 
 def main() -> int:
@@ -704,7 +766,7 @@ def main() -> int:
         write_json(
             output / "result.json", {"status": "NOT RUN", "meaning": "이번 실행 시작, 이전 PASS 재사용 금지"}
         )
-        run = LocalRun(db_root, output, port)
+        run = LocalRun(db_root, output, port, team_login=args.serve)
         if args.serve:
             run.serve(db_root / "private_credentials.json")
             return 0

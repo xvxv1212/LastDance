@@ -11,7 +11,7 @@ interface Props {
 
 /**
  * S08 점검 보고서(초안). 보고서는 AI 대역(백엔드 실행기)이 만든다. 화면은 시민 API GET /reports/{id}만 읽는다.
- * 보고서 ID는 제품 알림·목록 API가 없어 개발용 connection.json에서 읽는다.
+ * 로그인한 계정의 시연 API에서 보고서 ID를 조회한다.
  */
 export default function S08Report({ token, conn, onBack, onAuthError }: Props) {
   const [report, setReport] = useState<Report | null>(null);
@@ -30,7 +30,7 @@ export default function S08Report({ token, conn, onBack, onAuthError }: Props) {
           setReport(null);
           return;
         }
-        const c = await readConnection();
+        const c = await readConnection(token);
         const sameBasis = sameTime(c.facts_confirmed_at, facts.facts_confirmed_at);
         if (!c.report_id || !sameBasis) {
           setWaiting("현재 확인 상태로 만든 초안을 기다리는 중… (대역이 약 1~2초마다 확인)");
