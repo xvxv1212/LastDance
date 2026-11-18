@@ -83,3 +83,66 @@ jobs:
               raise SystemExit(f"FAIL: counts={counts}, total={len(cases)}, failed={failed}, skipped={skipped}")
           print("PASS: 10 DB migration tests, 0 failed, 0 skipped")
           PY
+
+  db-preparation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/requirements-checkpoint-test.txt
+      - name: Install isolated PostgreSQL test requirements
+        run: python -m pip install -r requirements-checkpoint-test.txt
+      - name: Run DB preparation tests
+        run: |
+          python -m pytest -v -ra --junitxml=db-preparation.xml tests/test_db_preparation.py
+      - name: Require the 6 named tests to pass with zero skips, failures or errors
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          source = Path("tests/test_db_preparation.py")
+          expected = {
+              node.name
+              for node in ast.parse(source.read_text(encoding="utf-8")).body
+              if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+          }
+          if len(expected) != 6:
+              raise SystemExit(f"FAIL: expected 6 test functions in {source}, found {len(expected)}")
+
+          path = Path("db-preparation.xml")
+          if not path.is_file():
+              raise SystemExit("FAIL: JUnit result missing")
+          root = ET.parse(path).getroot()
+          suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+          if not suites:
+              raise SystemExit("FAIL: no testsuite")
+          cases = [c for s in suites for c in s.findall("testcase")]
+          unexpected = sorted({c.get("classname", "") for c in cases} - {"tests.test_db_preparation"})
+          if unexpected:
+              raise SystemExit(f"FAIL: unexpected test class {unexpected}")
+          names = [c.get("name", "") for c in cases]
+          if len(names) != len(set(names)):
+              raise SystemExit(f"FAIL: duplicated test names {sorted(names)}")
+          missing = sorted(expected - set(names))
+          extra = sorted(set(names) - expected)
+          bad = sorted(
+              c.get("name", "")
+              for c in cases
+              if c.find("failure") is not None or c.find("error") is not None or c.find("skipped") is not None
+          )
+          if missing or extra or bad or len(cases) != 6:
+              raise SystemExit(f"FAIL: total={len(cases)}, missing={missing}, extra={extra}, failed_error_skipped={bad}")
+          print("PASS: 6 DB preparation tests, 0 failed, 0 errors, 0 skipped")
+          for name in sorted(names):
+              print(f"  PASSED {name}")
+          PY
