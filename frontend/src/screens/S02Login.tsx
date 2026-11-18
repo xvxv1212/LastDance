@@ -13,8 +13,9 @@ export default function S02Login({ onReady }: { onReady: (token: string, conn: C
     setBusy(true);
     setError(null);
     try {
-      const conn = await readConnection();
-      const res = await api.login(email.trim(), password);
+      const address = email.trim().replace(/^team([1-9][0-9]*)$/i, "synthetic-$1@example.invalid");
+      const res = await api.login(address, password);
+      const conn = await readConnection(res.access_token);
       setPassword("");
       onReady(res.access_token, conn);
     } catch (err) {
@@ -31,16 +32,15 @@ export default function S02Login({ onReady }: { onReady: (token: string, conn: C
         <span className="sid">S02</span>
         <h1>시험 계정으로 로그인</h1>
         <p className="muted">
-          백엔드 <code>--serve</code>가 만든 <code>private_credentials.json</code>의 첫 번째 계정을 입력하세요. 이 값은
-          채팅·Git·캡처에 남기지 않습니다.
+          팀에서 받은 아이디와 숫자 6자리 비밀번호를 입력하세요.
         </p>
         <label>
-          시험 계정 이메일
-          <input value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" required />
+          시험 계정 아이디
+          <input placeholder="team1" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" required />
         </label>
         <label>
           비밀번호
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" required />
+          <input type="password" inputMode="numeric" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" required />
         </label>
         {error && <div className="alert red" role="alert">{error}</div>}
         <button className="btn" disabled={busy}>

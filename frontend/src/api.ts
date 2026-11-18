@@ -112,17 +112,8 @@ export const api = {
   report: (token: string, reportId: string) => call<Report>("GET", `${PREFIX}/reports/${reportId}`, token),
 };
 
-export async function readConnection(): Promise<Connection> {
-  let res: Response;
-  let data: { code?: string; message?: string } | null = null;
-  try {
-    res = await fetch("/dev/connection.json", { cache: "no-store" });
-    data = await res.json();
-  } catch {
-    throw new ApiError(0, "DEV_SERVER", "화면 서버(npm run dev)와 연결이 잠깐 끊겼어요. 자동으로 다시 시도해요.");
-  }
-  if (!res.ok) throw new ApiError(res.status, data?.code ?? "NO_CONNECTION", data?.message ?? "연결 정보를 읽지 못했어요.");
-  return data as Connection;
+export function readConnection(token: string): Promise<Connection> {
+  return call<Connection>("GET", `${PREFIX}/demo/me`, token);
 }
 
 /** 서버 시각 표시. 서버(SystemClock)가 시간대 없이 UTC 시각을 보내면 UTC로 읽어 한국 시각으로 보여 준다. */
