@@ -5,11 +5,15 @@
 법률 결론, 승소 가능성, 확정 환불액을 자동 판정하지 않습니다.
 
 - 프로젝트 개발 마감: **2026-12-15**
-- 상태: **인수 후 상담자료 조회·근거 승인·실제 체크포인트 계약 검증 / 실제 모델·그래프·공용 환경·프론트 연결은 후속**
+- 상태: **인수 후 상담자료 조회·근거 승인·실제 체크포인트 계약 검증 / SYN-001 시민 화면 로컬 API 연결**
 - 담당: **이형민 백엔드·API·통합 / 김교민 DB 전담**. 채효석 AI 배정은 추천 상태입니다.
 - 기준: LastDance main `36c3286`과 인수 소스 `4d38245`의 이력을 보존한 별도 작업 브랜치입니다.
 
-## 현재 첫 실행
+## 팀원 빠른 시작
+
+**[내 PC에서 권리채비 화면 켜기](frontend/README.md)** — Windows와 VS Code에서 백엔드와 프론트를 실행하고, 시험 계정 로그인부터 점검 보고서까지 확인합니다. 각자 자신의 PC에서 실행하세요.
+
+## 백엔드 인수 검사
 
 **[백엔드 인수 실행 방법](backend/TAKEOVER_RUN.md)**에서 시작합니다.
 `python -m scripts.run_syn001 --verify`는 격리 DB와 실제 localhost HTTP로 첫 합성 사례를 검사합니다.
@@ -36,7 +40,7 @@
 | `backend/app/agent/` | LangGraph 상태·노드 | 폴더만 준비됨 |
 | `backend/alembic/` | DB 버전 관리 | 미설치·미초기화 (안내만 있음) |
 | `backend/tests/` | API 및 PDF 처리 테스트 | 구현됨 |
-| `frontend/` | React/Vite/TS 화면 개발 후보 | 앱 미생성 |
+| `frontend/` | React/Vite/TypeScript 시민 화면 | S02 로그인 → S04 상황 입력 → S07 사실 확인(B안) → S08 점검 보고서 |
 | `data/synthetic/` | 개인정보 없는 합성 사례 | 샘플 1건 제공 |
 | `docs/` | API/DB 초안 및 개발 시작 안내 | 초안 작성됨 |
 | `.github/workflows/` | GitHub PR 자동 검사 | 워크플로우 파일 추가 |
