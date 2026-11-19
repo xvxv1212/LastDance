@@ -15,6 +15,14 @@ export const FACT_LABEL: Record<string, string> = {
   OTHER: "계약서 사본 보유 여부",
 };
 
+// 고칠 때 단위를 함께 적도록 안내만 한다(저장 값은 사용자가 입력한 그대로, 화면이 단위를 덧붙이지 않음).
+export const UNIT: Record<string, string> = {
+  TOTAL_SESSIONS: "회",
+  USED_SESSIONS: "회",
+  PAYMENT_AMOUNT: "원",
+  CONTRACT_PERIOD: "개월",
+};
+
 export const STATUS_LABEL: Record<FactStatus, { text: string; tone: string }> = {
   EXTRACTED: { text: "미처리", tone: "red" },
   CONFIRMED: { text: "확인함", tone: "green" },
