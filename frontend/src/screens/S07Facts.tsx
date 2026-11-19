@@ -68,8 +68,11 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
   const n = facts.length;
   const pending = facts.filter((f) => f.status === "EXTRACTED");
   const known = facts.filter((f) => f.status === "CONFIRMED" || f.status === "MODIFIED");
-  const unknown = facts.filter((f) => f.status === "ACKNOWLEDGED_UNKNOWN" || f.status === "REJECTED");
+  // 상태별로 따로 센다: 모름(ACKNOWLEDGED_UNKNOWN)과 틀림 표시(REJECTED)를 섞지 않는다.
+  const unknown = facts.filter((f) => f.status === "ACKNOWLEDGED_UNKNOWN");
+  const rejected = facts.filter((f) => f.status === "REJECTED");
   const done = n - pending.length;
+  const countMismatch = known.length + unknown.length + rejected.length + pending.length !== n;
   const label = (f: Fact) => FACT_LABEL[f.fact_key] ?? f.fact_key;
 
   // 지금 보여 줄 질문: 고른 항목 → 없으면 첫 미처리 → 모두 처리했으면 완료 안내
@@ -155,7 +158,7 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
       {blocked && (
         <div className="b-alert" role="alert">
           {blocked === "ALL_UNKNOWN" ? (
-            <b>모든 항목이 ‘모름’이면 보고서를 만들 수 없어요. 알고 있는 사실을 1개 이상 확인해 주세요.</b>
+            <b>확인된 사실이 하나도 없으면(모두 ‘모름’ 또는 ‘틀림 표시’) 보고서를 만들 수 없어요. 알고 있는 사실을 1개 이상 확인해 주세요.</b>
           ) : (
             <>
               <b>아직 처리하지 않은 항목이 {blocked.length}개 있어요</b>
@@ -165,6 +168,11 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
         </div>
       )}
       {error && <div className="b-alert" role="alert">{error}</div>}
+      {countMismatch && (
+        <div className="b-alert" role="alert" data-testid="count-mismatch">
+          항목 상태를 다 세지 못했어요. 새로고침한 뒤에도 같으면 담당자에게 알려 주세요.
+        </div>
+      )}
       {notice && (
         <div className="b-notice" role="status">
           {notice}
@@ -202,7 +210,14 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
               {pending.length ? "다음 항목을 골라 주세요" : "확인할 항목을 모두 살펴봤어요."}
             </h2>
             <p>
-              내가 확인한 내용 <strong>{known.length}개</strong> · 모름으로 남긴 내용 <strong>{unknown.length}개</strong>
+              내가 확인한 내용 <strong data-testid="cnt-known">{known.length}개</strong> · 모름으로 남긴 내용{" "}
+              <strong data-testid="cnt-unknown">{unknown.length}개</strong>
+              {rejected.length > 0 && (
+                <>
+                  {" "}
+                  · 틀림 표시 <strong data-testid="cnt-rejected">{rejected.length}개</strong>
+                </>
+              )}
               {pending.length > 0 && (
                 <>
                   {" "}
@@ -237,7 +252,12 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
           <ul className="b-fact-list">
             {facts.map((f, i) => {
               const st = STATUS_LABEL[f.status];
-              const val = f.status === "ACKNOWLEDGED_UNKNOWN" ? "미확인" : f.current_value ?? (f.source_kind === "UNKNOWN" ? "아직 모름" : f.ai_value ?? "—");
+              const val =
+                f.status === "ACKNOWLEDGED_UNKNOWN"
+                  ? "미확인"
+                  : f.status === "REJECTED"
+                    ? "틀림 표시"
+                    : f.current_value ?? (f.source_kind === "UNKNOWN" ? "아직 모름" : f.ai_value ?? "—");
               const cls = ["b-fact-link", current?.id === f.id ? "current" : "", isBlockedFact(f) ? "blocked" : ""].filter(Boolean).join(" ");
               return (
                 <li key={f.id}>
@@ -263,7 +283,7 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
             <div className="b-inside">
               <p>
                 <b>사용자 진술</b>은 직접 설명한 내용, <b>계약서 원문</b>은 올린 계약서에서 찾은 내용, <b>미확인</b>은 아직 알 수
-                없는 내용이에요. 고친 값은 ‘고쳐서 확인’으로 표시해요.
+                없는 내용이에요. 고친 값은 ‘사용자가 고친 값’으로 표시하고, 처음 추출된 값과 그 출처는 따로 보여 줘요.
               </p>
               <p>계약서를 내지 않은 경우 원문·페이지를 표시하지 않아요.</p>
             </div>
@@ -299,10 +319,13 @@ function QuestionCard(p: CardProps) {
   const lab = FACT_LABEL[f.fact_key] ?? f.fact_key;
   const isUnknownSource = f.source_kind === "UNKNOWN";
   const isPending = f.status === "EXTRACTED";
-  const value = f.status === "ACKNOWLEDGED_UNKNOWN" ? null : f.current_value ?? (isUnknownSource ? null : f.ai_value);
+  const isModified = f.status === "MODIFIED";
+  const isRejected = f.status === "REJECTED";
+  const value =
+    f.status === "ACKNOWLEDGED_UNKNOWN" || isRejected ? null : f.current_value ?? (isUnknownSource ? null : f.ai_value);
+  // 처음 추출된 값의 출처. 고친 값(MODIFIED)에는 이 출처를 붙이지 않고 따로 보여 준다(원문 값으로 오인 방지).
   const src = sourceLabel(f.source_kind, f.page_no);
   const st = STATUS_LABEL[f.status];
-  const changed = f.status === "MODIFIED" && f.ai_value && f.ai_value !== f.current_value;
 
   return (
     <section className="b-surface" data-fid={f.id}>
@@ -322,16 +345,39 @@ function QuestionCard(p: CardProps) {
       {value ? (
         <>
           <div className="b-answer">{value}</div>
-          <p className="b-origin">
-            <span className={`b-tag ${src.tone === "red" ? "" : "accent"}`}>{src.text}</span>
-            {!isPending && <span className="b-tag state">{st.text}</span>}
-            {changed && <span className="b-was"> 처음 값(대역): {f.ai_value}</span>}
-          </p>
+          {isModified ? (
+            <>
+              <p className="b-origin">
+                <span className="b-tag user" data-testid="value-origin">사용자가 고친 값</span>
+                <span className="b-tag state">{st.text}</span>
+              </p>
+              <p className="b-was" data-testid="first-value">
+                {f.ai_value ? (
+                  <>
+                    처음 추출된 값: {f.ai_value} · 처음 추출한 값의 출처: {src.text}
+                  </>
+                ) : (
+                  <>처음에는 확인할 수 있는 값이 없었어요(미확인).</>
+                )}
+              </p>
+            </>
+          ) : (
+            <p className="b-origin">
+              <span className={`b-tag ${src.tone === "red" ? "" : "accent"}`} data-testid="value-origin">
+                {src.text}
+              </span>
+              {!isPending && <span className="b-tag state">{st.text}</span>}
+            </p>
+          )}
         </>
       ) : (
         <>
           <p className="b-empty-hint">
-            {f.status === "ACKNOWLEDGED_UNKNOWN" ? "‘모름’으로 남겼어요. 보고서에 미확인으로 표시돼요." : "아직 확인할 수 있는 내용이 없어요."}
+            {f.status === "ACKNOWLEDGED_UNKNOWN"
+              ? "‘모름’으로 남겼어요. 보고서에 미확인으로 표시돼요."
+              : isRejected
+                ? "‘틀림’으로 표시한 항목이에요. 확인된 사실로 쓰지 않아요."
+                : "아직 확인할 수 있는 내용이 없어요."}
             <br />
             모르면 지금 답하지 않아도 괜찮습니다.
           </p>
@@ -339,6 +385,11 @@ function QuestionCard(p: CardProps) {
             <span className="b-tag">{src.text}</span>
             {!isPending && <span className="b-tag state">{st.text}</span>}
           </p>
+          {isRejected && f.ai_value && (
+            <p className="b-was" data-testid="first-value">
+              처음 추출된 값: {f.ai_value} · 처음 추출한 값의 출처: {src.text}
+            </p>
+          )}
           <div className="b-notice neutral">
             {f.fact_key === "OTHER"
               ? "‘모르겠어요’는 ‘사본 없음’이 아니에요. 계약서를 갖고 있는지 확인되면 입력해 주세요."
