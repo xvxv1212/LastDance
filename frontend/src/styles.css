@@ -90,8 +90,9 @@ tr.hl { background: #fff0ec; box-shadow: inset 3px 0 0 var(--r); } tr.mod { back
 .b07 .b-small { font-size: 13px; color: var(--bmut); }
 .b07 .b-tag { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; background: #f0f3f6; border-radius: 5px; font-size: 12px; font-weight: 600; color: #485665; line-height: 1.6; margin-right: 6px; }
 .b07 .b-tag.accent { background: var(--bsoft); color: var(--bpd); }
+.b07 .b-tag.user { background: #fff; color: var(--bink, #17212F); box-shadow: inset 0 0 0 1px #c7d0db; }
 .b07 .b-tag.state { color: var(--bgood); background: #eff5f2; }
-.b07 .b-was { font-size: 13px; color: var(--bmut); }
+.b07 .b-was { font-size: 14px; color: var(--bmut); margin: 4px 0 0; }
 .b07 .b-question-count { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--bmut); }
 .b07 .b-bar { height: 4px; background: #e7ecf2; margin: 12px 0 26px; }
 .b07 .b-bar span { display: block; height: 100%; background: var(--bp); transition: width 0.2s; }
