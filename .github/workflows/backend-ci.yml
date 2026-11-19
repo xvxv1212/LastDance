@@ -146,3 +146,84 @@ jobs:
           for name in sorted(names):
               print(f"  PASSED {name}")
           PY
+
+  db-rls-isolation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/requirements-checkpoint-test.txt
+      - name: Install isolated PostgreSQL test requirements
+        run: python -m pip install -r requirements-checkpoint-test.txt
+      - name: Run DB RLS isolation tests
+        run: |
+          python -m pytest -v -ra --junitxml=db-rls-isolation.xml tests/test_db_rls_isolation.py
+      - name: Require the 15 named RLS test cases to pass exactly once with zero skips, failures or errors
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          # 매개변수 사례까지 이름으로 고정한다(함수 개수만 세면 [a]/[b] 같은 사례 누락을 놓친다).
+          module = "tests.test_db_rls_isolation"
+          expected = {
+              "test_app_role_cannot_bypass_and_every_citizen_table_forces_rls",
+              "test_bound_user_sees_only_own_rows_in_every_citizen_table[a]",
+              "test_bound_user_sees_only_own_rows_in_every_citizen_table[b]",
+              "test_no_user_binding_sees_no_protected_rows[unset]",
+              "test_no_user_binding_sees_no_protected_rows[empty]",
+              "test_binding_does_not_leak_into_next_transaction",
+              "test_cross_owner_update_changes_nothing",
+              "test_insert_on_behalf_of_other_user_violates_policy[session-as-other]",
+              "test_insert_on_behalf_of_other_user_violates_policy[fact-into-other-session]",
+              "test_insert_on_behalf_of_other_user_violates_policy[report-into-other-session]",
+              "test_insert_on_behalf_of_other_user_violates_policy[event-into-other-case]",
+              "test_app_role_lacks_delete_and_audit_read_privileges[delete-own-row]",
+              "test_app_role_lacks_delete_and_audit_read_privileges[read-audit-logs]",
+              "test_app_role_lacks_delete_and_audit_read_privileges[read-purge-tasks]",
+              "test_unit_of_work_binds_user_and_repositories_cannot_reach_other_rows",
+          }
+          if len(expected) != 15:
+              raise SystemExit(f"FAIL: expected list must hold 15 cases, found {len(expected)}")
+
+          path = Path("db-rls-isolation.xml")
+          if not path.is_file():
+              raise SystemExit("FAIL: JUnit result missing")
+          root = ET.parse(path).getroot()
+          suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+          if not suites:
+              raise SystemExit("FAIL: no testsuite")
+          cases = [c for s in suites for c in s.findall("testcase")]
+          if not cases:
+              raise SystemExit("FAIL: no test results")
+          unexpected = sorted({c.get("classname", "") for c in cases} - {module})
+          if unexpected:
+              raise SystemExit(f"FAIL: unexpected test class {unexpected}")
+          counts = Counter(c.get("name", "") for c in cases)
+          duplicated = sorted(n for n, k in counts.items() if k > 1)
+          missing = sorted(expected - set(counts))
+          extra = sorted(set(counts) - expected)
+          bad = sorted(
+              f"{c.get('name', '')}:{tag}"
+              for c in cases
+              for tag in ("failure", "error", "skipped")
+              if c.find(tag) is not None
+          )
+          if duplicated or missing or extra or bad or len(cases) != 15:
+              raise SystemExit(
+                  f"FAIL: total={len(cases)}, duplicated={duplicated}, missing={missing}, "
+                  f"extra={extra}, failed_error_skipped={bad}"
+              )
+          print("PASS: 15 DB RLS isolation test cases, 0 failed, 0 errors, 0 skipped")
+          for name in sorted(counts):
+              print(f"  PASSED {name}")
+          PY
