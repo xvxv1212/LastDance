@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { api, ApiError, fmtTime, type ConfirmAction, type Connection, type Fact, type SessionFacts } from "../api";
-import { FACT_LABEL, factQuestion, sourceLabel, STATUS_LABEL } from "../labels";
+import { FACT_LABEL, factQuestion, sourceLabel, STATUS_LABEL, UNIT } from "../labels";
 
 interface Props {
   token: string;
@@ -378,8 +378,12 @@ function QuestionCard(p: CardProps) {
               : isRejected
                 ? "‘틀림’으로 표시한 항목이에요. 확인된 사실로 쓰지 않아요."
                 : "아직 확인할 수 있는 내용이 없어요."}
-            <br />
-            모르면 지금 답하지 않아도 괜찮습니다.
+            {isPending && (
+              <>
+                <br />
+                모르면 지금 답하지 않아도 괜찮습니다.
+              </>
+            )}
           </p>
           <p className="b-origin">
             <span className="b-tag">{src.text}</span>
@@ -390,10 +394,14 @@ function QuestionCard(p: CardProps) {
               처음 추출된 값: {f.ai_value} · 처음 추출한 값의 출처: {src.text}
             </p>
           )}
-          <div className="b-notice neutral">
-            {f.fact_key === "OTHER"
-              ? "‘모르겠어요’는 ‘사본 없음’이 아니에요. 계약서를 갖고 있는지 확인되면 입력해 주세요."
-              : "기억나는 내용만 적거나 ‘모르겠어요’를 선택해 주세요. 예시 값을 자동으로 채우지 않습니다."}
+          <div className="b-notice neutral" data-testid="empty-notice">
+            {isRejected
+              ? "맞는 값을 알면 아래 버튼으로 입력해 주세요. 예시 값을 자동으로 채우지 않습니다."
+              : f.fact_key === "OTHER"
+                ? "‘모르겠어요’는 ‘사본 없음’이 아니에요. 계약서를 갖고 있는지 확인되면 입력해 주세요."
+                : isPending
+                  ? "기억나는 내용만 적거나 ‘모르겠어요’를 선택해 주세요. 예시 값을 자동으로 채우지 않습니다."
+                  : "나중에 알게 되면 ‘아는 내용 입력’으로 바꿀 수 있어요. 예시 값을 자동으로 채우지 않습니다."}
           </div>
         </>
       )}
@@ -418,6 +426,11 @@ function QuestionCard(p: CardProps) {
               }
             }}
           />
+          {UNIT[f.fact_key] && (
+            <p className="b-fine" data-testid="unit-hint">
+              숫자와 단위({UNIT[f.fact_key]})를 함께 적어 주세요.
+            </p>
+          )}
           {p.editError && (
             <p className="b-error" role="alert">
               {p.editError}
