@@ -76,6 +76,24 @@ class PrepareSessionRagReview:
         ):
             raise ConflictError("사용자가 확인한 사실이 필요합니다.")
 
+
+        # 검색 시작 시점의 사실을 불변 비교값으로 보관한다.
+        # 검색 도중 수정되면 오래된 근거를 사용하지 않는다.
+        initial_facts = tuple(
+            (
+                f.id,
+                f.check_session_id,
+                f.fact_key,
+                f.status,
+                f.value_text,
+                f.source_kind,
+                f.confirmed_by,
+                f.confirmed_at,
+            )
+            for f in data.facts
+        )
+
+
         parts = [data.session.situation_text or ""]
         parts.extend(
             f"{f.fact_key.value}: {f.value_text}"
@@ -115,6 +133,38 @@ class PrepareSessionRagReview:
                 stamp, "BLOCKED",
                 blocked_reasons=("SEARCH_RESULTS_INVALID",),
             )
+
+
+        # 검색 후 사용자 사실을 다시 읽는다.
+        # 최초 확인 시각 또는 사실 내용이 바뀌면 결과를 폐기한다.
+        latest = self.facts_reader.execute(user_id, session_id)
+        latest.session.ensure_owned_by(user_id)
+
+        latest_facts = tuple(
+            (
+                f.id,
+                f.check_session_id,
+                f.fact_key,
+                f.status,
+                f.value_text,
+                f.source_kind,
+                f.confirmed_by,
+                f.confirmed_at,
+            )
+            for f in latest.facts
+        )
+
+        if (
+            latest.session.status != SessionStatus.FACTS_CONFIRMED
+            or latest.session.facts_confirmed_at != stamp
+            or latest_facts != initial_facts
+        ):
+            return RagReview(
+                stamp,
+                "STALE",
+                blocked_reasons=("FACTS_CHANGED_DURING_SEARCH",),
+            )
+
 
         ids = list(dict.fromkeys(h.chunk_id for h in hits))
         packet = self.packet_builder.execute(
