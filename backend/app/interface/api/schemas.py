@@ -72,6 +72,10 @@ class ConfirmFactIn(_In):
 class SessionStatusOut(BaseModel):
     session_status: enums.SessionStatus
 
+class RagReviewStatusOut(BaseModel):
+    search_status: str
+    candidate_count: int
+    generation_allowed: bool
 
 class FactOut(BaseModel):
     """사실 1건(v0.11 조회). 파일 경로·저장소 키·confidence 는 내보내지 않는다."""

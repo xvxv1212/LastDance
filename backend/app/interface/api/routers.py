@@ -12,6 +12,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 
+from app.application.ports.services import ApprovedEvidenceReader
 from app.application.use_cases import account as uc_account
 from app.application.use_cases import agent as uc_agent
 from app.application.use_cases import case as uc_case
@@ -197,6 +198,38 @@ def confirm_fact(
 ) -> schemas.SessionStatusOut:
     cmd = uc_check.ConfirmFactCommand(user_id, fact_id, body.action, body.new_value)
     return schemas.SessionStatusOut(session_status=c.confirm_fact().execute(cmd))
+
+
+@router.post(
+    "/check-sessions/{session_id}/rag-review",
+    response_model=schemas.RagReviewStatusOut,
+    tags=["점검"],
+)
+def prepare_rag_review(
+    session_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(current_user_id),
+    c: Container = Depends(user_container),
+) -> schemas.RagReviewStatusOut:
+    """사용자 본인의 확인 사실로 근거 검토를 요청한다.
+
+    검색 결과를 승인·보고서 생성으로 자동 승격하지 않는다.
+    """
+    if not isinstance(c.knowledge, ApprovedEvidenceReader):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="공식 근거 검증기가 설정되지 않았습니다.",
+        )
+
+    result = c.prepare_rag_review().execute(
+        user_id=user_id,
+        session_id=session_id,
+    )
+
+    return schemas.RagReviewStatusOut(
+        search_status=result.search_status,
+        candidate_count=len(result.candidate_ids),
+        generation_allowed=result.generation_allowed,
+    )
 
 
 # =============================================================================

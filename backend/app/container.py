@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import copy
 import uuid
+from collections.abc import Callable, Sequence
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.application.ports.services import (
     AgencyDirectory,
+    ApprovedEvidenceReader,
     CheckpointStore,
     Clock,
     ExternalModelClient,
@@ -27,7 +29,9 @@ from app.application.use_cases import account as uc_account
 from app.application.use_cases import agent as uc_agent
 from app.application.use_cases import case as uc_case
 from app.application.use_cases import check_session as uc_check
+from app.application.use_cases import rag_review as uc_rag
 from app.application.use_cases import report as uc_report
+from app.application.use_cases.evidence_packet import PrepareEvidencePacket
 from app.domain.policies import (
     CitationVerifier,
     ExternalTransferPolicy,
@@ -69,6 +73,7 @@ class Container:
         retention: uc_agent.RetentionPolicy | None = None,
         access_token_minutes: int = 60,
         public_signup_enabled: bool = False,
+        rag_retriever: Callable[[str], Sequence[uc_rag.RagHit]] | None = None,
     ) -> None:
         self._factory = session_factory
         # v0.8 RLS: 파기 배치처럼 모든 사용자 행을 다루는 작업은 RLS 우회 전용 계정(BYPASSRLS)으로만 접속
@@ -96,6 +101,7 @@ class Container:
         self._retention = retention or uc_agent.RetentionPolicy(deleted_case_grace_days=purge_grace_days)
         # 업무 DB 밖의 저장소(v0.6). 미설정이면 '비어 있는' 구현 → 인용은 모두 CHUNK_NOT_FOUND 로 보류된다
         self.knowledge: KnowledgeBase = knowledge or LocalKnowledgeBase([], [])
+        self._rag_retriever = rag_retriever
         self.agencies: AgencyDirectory = agencies or JsonAgencyDirectory([])
         self._verifier = CitationVerifier()
         self._transfer_policy = ExternalTransferPolicy(entrustment_enabled=entrustment_enabled)
@@ -156,6 +162,24 @@ class Container:
 
     def list_session_facts(self) -> uc_check.ListSessionFacts:
         return uc_check.ListSessionFacts(self._uow(), self.clock)
+
+    def prepare_rag_review(self) -> uc_rag.PrepareSessionRagReview:
+        """인증된 사용자에 묶인 RAG 검토 실행기.
+
+        공식 근거 검증기가 없으면 실행하지 않는다.
+        모델 호출·보고서 저장·승인은 수행하지 않는다.
+        """
+        if self._acting_user_id is None:
+            raise RuntimeError("사용자 문맥이 없는 RAG 검토는 허용하지 않습니다.")
+
+        if not isinstance(self.knowledge, ApprovedEvidenceReader):
+            raise RuntimeError("공식 근거 승인 검증기가 설정되지 않았습니다.")
+
+        return uc_rag.PrepareSessionRagReview(
+            self.list_session_facts(),
+            PrepareEvidencePacket(self.knowledge, {}),
+            self._rag_retriever,
+        )
 
     # --- 보고서 -----------------------------------------------------------
     def submit_report(self) -> uc_report.SubmitInspectionReport:
