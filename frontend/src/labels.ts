@@ -31,6 +31,17 @@ export const STATUS_LABEL: Record<FactStatus, { text: string; tone: string }> = 
   ACKNOWLEDGED_UNKNOWN: { text: "모름으로 남김", tone: "gray" },
 };
 
+// 화면이 모르는 상태값(서버가 새 상태를 보낸 경우)을 위한 안전 표시. 새 상태를 만들거나 다른 상태로 바꾸지 않는다.
+export const UNSUPPORTED_STATUS_LABEL = { text: "확인할 수 없는 상태", tone: "red" } as const;
+
+export function isKnownStatus(s: string): s is FactStatus {
+  return Object.prototype.hasOwnProperty.call(STATUS_LABEL, s);
+}
+
+export function statusLabel(s: string): { text: string; tone: string } {
+  return isKnownStatus(s) ? STATUS_LABEL[s] : UNSUPPORTED_STATUS_LABEL;
+}
+
 export function sourceLabel(kind: SourceKind, page: number | null): { text: string; tone: string } {
   if (kind === "DOCUMENT") return { text: `계약서 원문${page ? ` p.${page}` : ""}`, tone: "green" };
   if (kind === "STATEMENT") return { text: "사용자 진술", tone: "orange" };

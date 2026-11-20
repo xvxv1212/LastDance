@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { api, ApiError, fmtTime, type ConfirmAction, type Connection, type Fact, type SessionFacts } from "../api";
-import { FACT_LABEL, factQuestion, sourceLabel, STATUS_LABEL, UNIT } from "../labels";
+import { FACT_LABEL, factQuestion, isKnownStatus, sourceLabel, statusLabel, UNIT } from "../labels";
 
 interface Props {
   token: string;
@@ -24,7 +24,7 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
   const [draft, setDraft] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [blocked, setBlocked] = useState<Fact[] | "ALL_UNKNOWN" | null>(null);
+  const [blocked, setBlocked] = useState<Fact[] | "ALL_UNKNOWN" | "UNSUPPORTED" | null>(null);
   const questionRef = useRef<HTMLHeadingElement | null>(null);
 
   const fail = useCallback(
@@ -71,12 +71,14 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
   // 상태별로 따로 센다: 모름(ACKNOWLEDGED_UNKNOWN)과 틀림 표시(REJECTED)를 섞지 않는다.
   const unknown = facts.filter((f) => f.status === "ACKNOWLEDGED_UNKNOWN");
   const rejected = facts.filter((f) => f.status === "REJECTED");
-  const done = n - pending.length;
-  const countMismatch = known.length + unknown.length + rejected.length + pending.length !== n;
+  // 화면이 모르는 상태값: 확인·모름·틀림으로 자동 분류하지 않고, 처리 수에도 넣지 않으며, 완료를 막는다.
+  const unsupported = facts.filter((f) => !isKnownStatus(f.status));
+  const done = n - pending.length - unsupported.length;
+  const countMismatch = known.length + unknown.length + rejected.length + pending.length + unsupported.length !== n;
   const label = (f: Fact) => FACT_LABEL[f.fact_key] ?? f.fact_key;
 
   // 지금 보여 줄 질문: 고른 항목 → 없으면 첫 미처리 → 모두 처리했으면 완료 안내
-  const current = facts.find((f) => f.id === cursor) ?? (cursor === null ? pending[0] : undefined) ?? null;
+  const current = facts.find((f) => f.id === cursor) ?? (cursor === null ? pending[0] ?? unsupported[0] : undefined) ?? null;
   const idx = current ? facts.findIndex((f) => f.id === current.id) : -1;
 
   const nextAfter = (d: SessionFacts | null, fromId: string): string | null => {
@@ -137,6 +139,11 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
       open(pending[0].id);
       return;
     }
+    if (unsupported.length > 0) {
+      setBlocked("UNSUPPORTED");
+      open(unsupported[0].id);
+      return;
+    }
     if (known.length === 0) {
       setBlocked("ALL_UNKNOWN");
       return;
@@ -145,7 +152,8 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
     else void load();
   };
 
-  const isBlockedFact = (f: Fact) => blocked !== null && blocked !== "ALL_UNKNOWN" && blocked.some((b) => b.id === f.id);
+  const isBlockedFact = (f: Fact) =>
+    blocked === "UNSUPPORTED" ? !isKnownStatus(f.status) : Array.isArray(blocked) && blocked.some((b) => b.id === f.id);
 
   return (
     <section className="b07">
@@ -157,7 +165,12 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
 
       {blocked && (
         <div className="b-alert" role="alert">
-          {blocked === "ALL_UNKNOWN" ? (
+          {blocked === "UNSUPPORTED" ? (
+            <b data-testid="unsupported-block">
+              ‘{unsupported.map(label).join(" · ")}’ 항목이 확인할 수 없는 상태라서 완료할 수 없어요. 다시 불러와도 같으면 담당자에게 알려
+              주세요.
+            </b>
+          ) : blocked === "ALL_UNKNOWN" ? (
             <b>확인된 사실이 하나도 없으면(모두 ‘모름’ 또는 ‘틀림 표시’) 보고서를 만들 수 없어요. 알고 있는 사실을 1개 이상 확인해 주세요.</b>
           ) : (
             <>
@@ -168,6 +181,15 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
         </div>
       )}
       {error && <div className="b-alert" role="alert">{error}</div>}
+      {unsupported.length > 0 && blocked !== "UNSUPPORTED" && (
+        <div className="b-alert" role="alert" data-testid="unsupported-alert">
+          확인할 수 없는 상태의 항목이 {unsupported.length}개 있어요 — {unsupported.map(label).join(" · ")}. 이 항목이 있으면 확인 완료를 할 수
+          없어요.{" "}
+          <button className="b-text-btn" onClick={() => void load()}>
+            다시 불러오기
+          </button>
+        </div>
+      )}
       {countMismatch && (
         <div className="b-alert" role="alert" data-testid="count-mismatch">
           항목 상태를 다 세지 못했어요. 새로고침한 뒤에도 같으면 담당자에게 알려 주세요.
@@ -195,6 +217,7 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
             onDraft={setDraft}
             onConfirm={() => act(current, "CONFIRM")}
             onUnknown={() => act(current, "ACKNOWLEDGE_UNKNOWN")}
+            onReload={() => void load()}
             onEdit={() => startEdit(current)}
             onSave={() => saveEdit(current)}
             onCancel={() => {
@@ -207,7 +230,7 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
         ) : (
           <section className="b-surface" aria-labelledby="b-ready-title">
             <h2 className="b-ready-title" id="b-ready-title" tabIndex={-1} ref={questionRef}>
-              {pending.length ? "다음 항목을 골라 주세요" : "확인할 항목을 모두 살펴봤어요."}
+              {pending.length || unsupported.length ? "다음 항목을 골라 주세요" : "확인할 항목을 모두 살펴봤어요."}
             </h2>
             <p>
               내가 확인한 내용 <strong data-testid="cnt-known">{known.length}개</strong> · 모름으로 남긴 내용{" "}
@@ -222,6 +245,12 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
                 <>
                   {" "}
                   · 아직 확인 전 <strong>{pending.length}개</strong>
+                </>
+              )}
+              {unsupported.length > 0 && (
+                <>
+                  {" "}
+                  · 확인할 수 없는 상태 <strong data-testid="cnt-unsupported">{unsupported.length}개</strong>
                 </>
               )}
             </p>
@@ -251,7 +280,7 @@ export default function S07Facts({ token, conn, onDone, onAuthError }: Props) {
           </div>
           <ul className="b-fact-list">
             {facts.map((f, i) => {
-              const st = STATUS_LABEL[f.status];
+              const st = statusLabel(f.status);
               const val =
                 f.status === "ACKNOWLEDGED_UNKNOWN"
                   ? "미확인"
@@ -307,6 +336,7 @@ interface CardProps {
   onDraft: (v: string) => void;
   onConfirm: () => void;
   onUnknown: () => void;
+  onReload: () => void;
   onEdit: () => void;
   onSave: () => void;
   onCancel: () => void;
@@ -321,11 +351,46 @@ function QuestionCard(p: CardProps) {
   const isPending = f.status === "EXTRACTED";
   const isModified = f.status === "MODIFIED";
   const isRejected = f.status === "REJECTED";
+  const isUnsupported = !isKnownStatus(f.status);
   const value =
     f.status === "ACKNOWLEDGED_UNKNOWN" || isRejected ? null : f.current_value ?? (isUnknownSource ? null : f.ai_value);
   // 처음 추출된 값의 출처. 고친 값(MODIFIED)에는 이 출처를 붙이지 않고 따로 보여 준다(원문 값으로 오인 방지).
   const src = sourceLabel(f.source_kind, f.page_no);
-  const st = STATUS_LABEL[f.status];
+  const st = statusLabel(f.status);
+
+  if (isUnsupported) {
+    // 서버 값·출처는 바꾸지 않고 그대로 보여 주기만 한다. 확인·모름·틀림 버튼은 두지 않는다.
+    const raw = f.current_value ?? f.ai_value;
+    return (
+      <section className="b-surface" data-fid={f.id}>
+        <div className="b-question-count">
+          <span>
+            질문 {p.idx + 1} / {p.n}
+          </span>
+          <strong>{p.done}개 처리했어요</strong>
+        </div>
+        <h2 className="b-question" tabIndex={-1} ref={p.questionRef}>
+          {factQuestion(f.fact_key, lab, isUnknownSource)}
+        </h2>
+        {raw ? <div className="b-answer">{raw}</div> : <p className="b-empty-hint">표시할 값이 없어요.</p>}
+        <p className="b-origin">
+          <span className="b-tag">{src.text}</span>
+          <span className="b-tag" data-testid="unsupported-tag">
+            {st.text}
+          </span>
+        </p>
+        <div className="b-notice neutral" data-testid="unsupported-notice">
+          이 항목은 화면이 아직 알 수 없는 상태로 왔어요. 확인·모름·틀림으로 바꿔 처리하지 않고 그대로 두며, 이 항목이 있으면 확인 완료를 할 수
+          없어요. 다시 불러와도 같으면 담당자에게 알려 주세요.
+        </div>
+        <div className="b-question-actions single">
+          <button className="b-secondary" disabled={p.busy} onClick={p.onReload}>
+            다시 불러오기
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="b-surface" data-fid={f.id}>
